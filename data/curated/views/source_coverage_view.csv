@@ -1,0 +1,6 @@
+source_id,layer,sample_count,measurement_count,min_year,max_year,country_count
+literature_search,plant_gut,0,0,,,0
+nhanes_blood_cadmium,blood,401,401,,,1
+fda_tds,food,25501,25501,,,1
+usgs_soil,soil,4816,4816,,,1
+washington_fertilizer,fertilizer,11,11,,,1

@@ -1,0 +1,148 @@
+from __future__ import annotations
+
+import zipfile
+from pathlib import Path
+
+import pandas as pd
+import polars as pl
+import pyreadstat
+
+from cadmium_lake.io import read_duckdb_table
+from cadmium_lake.normalize.pipeline import run_normalization
+from cadmium_lake.pipeline import fetch_sources, initialize_catalog_tables, parse_sources, run_literature_search
+from cadmium_lake.qa.checks import run_qa_checks
+from cadmium_lake.sources import SOURCE_REGISTRY
+from cadmium_lake.viz.views import build_views
+
+
+def test_fetch_manifest_hash_stability(monkeypatch):
+    initialize_catalog_tables()
+
+    def fake_download(self, url):
+        return b"fixture-content"
+
+    def fake_list(self, letter):
+        return [{"AutoKey": 1, "ProductNumber": "0001-0003", "ProductName": "Fixture Fertilizer"}] if letter == "A" else []
+
+    def fake_detail(self, auto_key):
+        return {
+            "Product": {
+                "prod_number": "0001-0003",
+                "prod_name": "Fixture Fertilizer",
+                "cd_met_type": "=",
+                "pc_cd_metals": "12.5",
+            }
+        }
+
+    monkeypatch.setattr(SOURCE_REGISTRY["washington_fertilizer"], "_download", fake_download)
+    monkeypatch.setattr(SOURCE_REGISTRY["washington_fertilizer"], "_fetch_fertilizer_list", fake_list)
+    monkeypatch.setattr(SOURCE_REGISTRY["washington_fertilizer"], "_fetch_fertilizer_detail", fake_detail)
+    results = fetch_sources(source="washington_fertilizer")
+    assert results["washington_fertilizer"] >= 1
+    source_files = read_duckdb_table("source_files")
+    assert source_files.height >= 1
+    assert source_files["sha256"][0]
+
+
+def test_parse_smoke_for_all_sources(tmp_path):
+    initialize_catalog_tables()
+    seed_washington_fixture()
+    seed_usgs_fixture()
+    seed_fda_fixture()
+    seed_nhanes_fixture()
+
+    parse_sources(source="washington_fertilizer")
+    parse_sources(source="usgs_soil")
+    parse_sources(source="fda_tds")
+    parse_sources(source="nhanes_blood_cadmium")
+
+    samples = read_duckdb_table("samples")
+    raw = read_duckdb_table("measurements_raw")
+    assert samples.height >= 4
+    assert raw.height >= 4
+
+
+def test_literature_search_capture(monkeypatch):
+    initialize_catalog_tables()
+
+    adapter_cls = SOURCE_REGISTRY["literature_search"]
+
+    def fake_json(self, url):
+        if "europepmc" in url:
+            return {"resultList": {"result": [{"title": "Cadmium in rice", "doi": "10.1/abc", "pmid": "123", "pubYear": "2022"}]}}
+        if "openalex" in url:
+            return {"results": [{"display_name": "Cadmium bioaccessibility", "doi": "10.1/def", "publication_year": 2023, "ids": {}, "locations": []}]}
+        return {"data": [{"attributes": {"titles": [{"title": "Cadmium supplement"}], "doi": "10.1/ghi", "publicationYear": 2021, "url": "https://example.org"}}]}
+
+    monkeypatch.setattr(adapter_cls, "_json", fake_json)
+    results = run_literature_search()
+    assert results["studies_or_batches"] >= 3
+    review = read_duckdb_table("review_queue")
+    assert review.height >= 1
+
+
+def test_normalize_qa_and_views():
+    initialize_catalog_tables()
+    seed_washington_fixture()
+    seed_usgs_fixture()
+    seed_fda_fixture()
+    seed_nhanes_fixture()
+    parse_sources()
+    normalized = run_normalization()
+    assert normalized.height >= 4
+    qa_outputs = run_qa_checks()
+    assert "provenance_completeness_report" in qa_outputs
+    build_views()
+    chain = read_duckdb_table("measurements_normalized")
+    assert chain.height >= 4
+
+
+def seed_washington_fixture():
+    raw_dir = Path("data/raw/washington_fertilizer")
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw_dir.joinpath("landing.html").write_text(
+        "<html><body>fixture</body></html>",
+        encoding="utf-8",
+    )
+    raw_dir.joinpath("fertilizer_detail.json").write_text(
+        """
+        [
+          {
+            "Product": {
+              "prod_number": "0001-0003",
+              "prod_name": "Fertilizer A",
+              "cd_met_type": "=",
+              "pc_cd_metals": "12.5"
+            }
+          }
+        ]
+        """,
+        encoding="utf-8",
+    )
+
+
+def seed_usgs_fixture():
+    raw_dir = Path("data/raw/usgs_soil")
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = raw_dir / "soil.csv"
+    csv_path.write_text("sample_id,latitude,longitude,cadmium_mgkg\nS1,47.1,-122.3,0.8\n", encoding="utf-8")
+    with zipfile.ZipFile(raw_dir / "usgs_soildata.zip", "w") as zf:
+        zf.write(csv_path, arcname="soil.csv")
+
+
+def seed_fda_fixture():
+    raw_dir = Path("data/raw/fda_tds")
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(raw_dir / "https:__www.fda.gov_media_151752_download", "w") as zf:
+        zf.writestr(
+            "Elements 2003.txt",
+            "MB\tFood No.\tFood Name\tAnal Type\tSample Qualifier\tReplicate No.\tElement\tConc\tUnit\tTrace\tLOD\tLOQ\tResult Qualifier and Remarks\tMethod\tInstrument\tBatch ID\n"
+            '200301\t1\t"Spinach"\tO\t\t\tCadmium\t0.04\tmg/kg\t\t0.002\t0.005\t\tMethod\tInst\t316\n',
+        )
+
+
+def seed_nhanes_fixture():
+    raw_dir = Path("data/raw/nhanes_blood_cadmium")
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    frame = pd.DataFrame([{"SEQN": 1001, "LBXBCD": 0.31, "SDDSRVYR": 10}])
+    pyreadstat.write_xport(frame, raw_dir / "cadmium_fixture.xpt")

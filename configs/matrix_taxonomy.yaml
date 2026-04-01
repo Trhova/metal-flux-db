@@ -1,0 +1,13 @@
+matrix_groups:
+  fertilizer:
+    canonical_units: ["mg/kg", "ug/kg"]
+  soil:
+    canonical_units: ["mg/kg", "ug/kg"]
+  plant:
+    canonical_units: ["mg/kg", "ug/kg"]
+  food:
+    canonical_units: ["mg/kg", "ug/kg"]
+  gut:
+    canonical_units: ["ug/day", "ug/kg_bw/day"]
+  blood:
+    canonical_units: ["ug/L"]

@@ -1,0 +1,12 @@
+
+        [
+          {
+            "Product": {
+              "prod_number": "0001-0003",
+              "prod_name": "Fertilizer A",
+              "cd_met_type": "=",
+              "pc_cd_metals": "12.5"
+            }
+          }
+        ]
+        

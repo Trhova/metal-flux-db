@@ -1,0 +1,35 @@
+solid_units:
+  mg/kg:
+    canonical_dimension: mass_per_mass
+    aliases: ["mg/kg", "mg per kg", "milligram/kilogram"]
+  ug/kg:
+    canonical_dimension: mass_per_mass
+    aliases: ["ug/kg", "µg/kg", "mcg/kg"]
+  ug/g:
+    canonical_dimension: mass_per_mass
+    aliases: ["ug/g", "µg/g", "mcg/g"]
+  ng/g:
+    canonical_dimension: mass_per_mass
+    aliases: ["ng/g"]
+  ppm:
+    canonical_dimension: solids_ppm
+    aliases: ["ppm", "parts per million"]
+liquid_units:
+  ug/L:
+    canonical_dimension: mass_per_volume
+    aliases: ["ug/L", "µg/L", "mcg/L"]
+gut_units:
+  ug/day:
+    canonical_dimension: intake_mass_per_day
+    aliases: ["ug/day", "µg/day", "mcg/day"]
+  ug/kg_bw/day:
+    canonical_dimension: intake_mass_per_mass_per_day
+    aliases: ["ug/kg bw/day", "ug/kg_bw/day", "µg/kg bw/day"]
+basis_aliases:
+  dry_weight: ["dry weight", "dw", "dry wt", "dry basis"]
+  wet_weight: ["wet weight", "ww", "wet wt", "wet basis"]
+  fresh_weight: ["fresh weight", "fw", "fresh wt"]
+  as_sold: ["as sold"]
+  as_prepared: ["as prepared"]
+  edible_portion: ["edible portion", "edible"]
+  whole_sample: ["whole sample", "whole"]

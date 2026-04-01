@@ -1,0 +1,9 @@
+analytes:
+  - analyte_name: cadmium
+    canonical_symbol: Cd
+    canonical_cas: "7440-43-9"
+    synonyms:
+      - cadmium
+      - cd
+      - cadmium, total
+      - blood cadmium
