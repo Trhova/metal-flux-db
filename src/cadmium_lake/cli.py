@@ -49,8 +49,10 @@ def parse(source: str | None = typer.Option(default=None, help="Single source id
 
 
 @app.command("literature-search")
-def literature_search() -> None:
-    results = run_literature_search()
+def literature_search(
+    layer: str | None = typer.Option(default=None, help="Limit search to plant or gut"),
+) -> None:
+    results = run_literature_search(layer=layer)
     for name, count in results.items():
         typer.echo(f"{name}: {count}")
 

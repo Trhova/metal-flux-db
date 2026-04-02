@@ -131,6 +131,18 @@ def normalize_measurement(
             uncertainty_flag=False,
         )
 
+    if matrix_group == "gut" and raw_unit in {"%", "percent", "fraction"}:
+        canonical_value = raw_value / 100.0 if raw_unit in {"%", "percent"} else raw_value
+        return NormalizationResult(
+            canonical_value=_safe_float(canonical_value),
+            canonical_unit="fraction",
+            canonical_dimension="fraction",
+            conversion_rule="percent_to_fraction" if raw_unit in {"%", "percent"} else "identity",
+            converted_from_unit=raw_unit,
+            normalized_basis=normalized_basis,
+            uncertainty_flag=False,
+        )
+
     return NormalizationResult(
         canonical_value=None,
         canonical_unit=None,

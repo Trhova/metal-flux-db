@@ -24,6 +24,7 @@ from cadmium_lake.utils import now_utc, sha256_file, stable_id
 
 @dataclass
 class ParsedPayload:
+    source_files: list[SourceFileRecord] = field(default_factory=list)
     studies_or_batches: list[StudyRecord] = field(default_factory=list)
     samples: list[SampleRecord] = field(default_factory=list)
     measurements_raw: list[RawMeasurementRecord] = field(default_factory=list)

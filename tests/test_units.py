@@ -1,3 +1,5 @@
+import pytest
+
 from cadmium_lake.normalize.units import normalize_basis, normalize_measurement
 
 
@@ -43,6 +45,18 @@ def test_blood_unit_identity():
 def test_gut_unit_identity():
     result = normalize_measurement(matrix_group="gut", raw_value=15.0, raw_unit="ug/day", raw_basis_text=None)
     assert result.canonical_dimension == "intake_mass_per_day"
+
+
+def test_gut_percent_to_fraction():
+    result = normalize_measurement(
+        matrix_group="gut",
+        raw_value=5.73,
+        raw_unit="%",
+        raw_basis_text="bioaccessible_fraction",
+    )
+    assert result.canonical_value == pytest.approx(0.0573)
+    assert result.canonical_unit == "fraction"
+    assert result.canonical_dimension == "fraction"
 
 
 def test_basis_normalization():

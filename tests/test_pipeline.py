@@ -81,6 +81,78 @@ def test_literature_search_capture(monkeypatch):
     assert review.height >= 1
 
 
+def test_literature_curated_extractors(monkeypatch):
+    initialize_catalog_tables()
+
+    adapter_cls = SOURCE_REGISTRY["literature_search"]
+
+    def fake_json(self, url):
+        if "PMCID:PMC12733840" in url or "PMCID%3APMC12733840" in url:
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Rice cadmium paper",
+                            "doi": "10.1000/rice",
+                            "pmid": "111",
+                            "pmcid": "PMC12733840",
+                            "pubYear": "2024",
+                        }
+                    ]
+                }
+            }
+        if "PMCID:PMC12846066" in url or "PMCID%3APMC12846066" in url:
+            return {
+                "resultList": {
+                    "result": [
+                        {
+                            "title": "Gut cadmium paper",
+                            "doi": "10.1000/gut",
+                            "pmid": "222",
+                            "pmcid": "PMC12846066",
+                            "pubYear": "2024",
+                        }
+                    ]
+                }
+            }
+        return {"resultList": {"result": []}, "esearchresult": {"idlist": []}, "result": {"uids": []}, "data": []}
+
+    def fake_download_text(self, url):
+        if "PMC12733840" in url:
+            return """
+            <html><body>
+            <table>
+              <tr><th>Site</th><th colspan="3">Cd Concentrations</th></tr>
+              <tr><th>Site</th><th>TCd-S</th><th>ACd-S</th><th>TCd-G (mg/kg)</th></tr>
+              <tr><td>MC</td><td>2.00 ± 0.10 c</td><td>1.26 ± 0.08 c</td><td>0.13 ± 0.03 b</td></tr>
+              <tr><td>SC1</td><td>3.29 ± 0.13 a</td><td>2.12 ± 0.09 b</td><td>0.16 ± 0.04 b</td></tr>
+            </table>
+            </body></html>
+            """
+        return """
+        <html><body>
+        <table><tr><th>ignore</th></tr></table>
+        <table>
+          <tr><th>Mushroom Fruiting Bodies</th><th>Biological Accessibility of Cadmium (%)</th></tr>
+          <tr><th>Body</th><th>Accessibility</th></tr>
+          <tr><td><em>A. blazei</em></td><td>5.73 ± 0.04</td></tr>
+          <tr><td><em>L. edodes</em></td><td>N</td></tr>
+        </table>
+        </body></html>
+        """
+
+    monkeypatch.setattr(adapter_cls, "_json", fake_json)
+    monkeypatch.setattr(adapter_cls, "_download_text", fake_download_text)
+    monkeypatch.setattr(adapter_cls, "_download", lambda self, url: b"pdf-bytes")
+
+    results = run_literature_search(layer="plant")
+    assert results["samples"] >= 2
+    samples = read_duckdb_table("samples").filter(pl.col("source_id") == "literature_search")
+    raw = read_duckdb_table("measurements_raw").join(samples.select("sample_id"), on="sample_id", how="inner")
+    assert samples.height >= 2
+    assert raw.height >= 2
+
+
 def test_normalize_qa_and_views():
     initialize_catalog_tables()
     seed_washington_fixture()

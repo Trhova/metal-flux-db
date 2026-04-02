@@ -4,10 +4,10 @@ sources:
     layer: fertilizer
     organization: Washington State Department of Agriculture
     country_or_region: US-WA
-    access_type: html
+    access_type: api
     source_url: https://agr.wa.gov/departments/pesticides-and-fertilizers/fertilizers/fertilizer-database/fertilizer-product-lookup
     license_or_terms: Public website; respect robots and rate limits.
-    retrieval_method: html_table_export
+    retrieval_method: json_endpoint
     priority: tier_1
     parser_class: WashingtonFertilizerAdapter
     status: implemented
@@ -58,14 +58,70 @@ sources:
   - source_id: literature_search
     source_name: Plant and gut cadmium literature search inventory
     layer: plant_gut
-    organization: Europe PMC / PubMed / OpenAlex / DataCite
+    organization: Europe PMC / PubMed / PMC / OpenAlex / DataCite
     country_or_region: global
     access_type: api
     source_url: https://europepmc.org/
     license_or_terms: Source APIs each retain their own terms and rate limits.
-    retrieval_method: api_search
+    retrieval_method: api_search_plus_pmc_html
     priority: tier_1
     parser_class: LiteratureSearchAdapter
     status: implemented
-    maturity: search_inventory_only
-    notes: Reproducible search + metadata inventory + review queue; deep PDF extraction deferred.
+    maturity: first_curated_records
+    notes: Reproducible search + metadata inventory + review queue with first live curated plant and gut rows from PMC HTML tables.
+  - source_id: esdac_lucas_soil
+    source_name: ESDAC LUCAS topsoil trace elements
+    layer: soil
+    organization: European Commission Joint Research Centre
+    country_or_region: EU
+    access_type: csv
+    source_url: https://esdac.jrc.ec.europa.eu/projects/lucas
+    license_or_terms: Review ESDAC download terms and attribution requirements.
+    retrieval_method: direct_file_download
+    priority: tier_2
+    parser_class: null
+    status: planned
+    maturity: inventory_only
+    notes: Strong European soil candidate for cadmium coverage across EU member states.
+  - source_id: gemas_soil
+    source_name: GEMAS agricultural and grazing land geochemistry
+    layer: soil
+    organization: EuroGeoSurveys GEMAS project
+    country_or_region: Europe
+    access_type: pdf
+    source_url: https://gemas.eurogeosurveys.org/
+    license_or_terms: Review GEMAS access and attribution terms.
+    retrieval_method: atlas_download
+    priority: tier_2
+    parser_class: null
+    status: planned
+    maturity: inventory_only
+    notes: European soil geochemistry source with cadmium-relevant atlas and supporting materials.
+  - source_id: uk_fsa_total_diet
+    source_name: UK Food Standards Agency Total Diet Study
+    layer: food
+    organization: UK Food Standards Agency
+    country_or_region: UK
+    access_type: html
+    source_url: https://www.food.gov.uk/research/research-projects/total-diet-study
+    license_or_terms: Review UK FSA terms and downloadable table availability.
+    retrieval_method: report_download
+    priority: tier_2
+    parser_class: null
+    status: planned
+    maturity: inventory_only
+    notes: European food cadmium candidate complementary to FDA TDS.
+  - source_id: hbm4eu_parc_cadmium
+    source_name: HBM4EU and PARC cadmium biomonitoring summaries
+    layer: blood
+    organization: HBM4EU / PARC
+    country_or_region: EU
+    access_type: dashboard
+    source_url: https://www.hbm4eu.eu/
+    license_or_terms: Review dashboard terms; many outputs are summary statistics rather than row-level data.
+    retrieval_method: dashboard_summary
+    priority: tier_2
+    parser_class: null
+    status: planned
+    maturity: summary_stats_only
+    notes: European biomonitoring layer; keep separate from individual-row sources unless row-level exports are available.

@@ -17,14 +17,14 @@ Cadmium Lake is a provenance-first cadmium data lake and exploration layer. It i
 
 ```text
 configs/
-data/
-  raw/
-  staging/
-  curated/
 docs/
 notebooks/
 src/cadmium_lake/
 tests/
+data/              # local only, ignored by git
+  raw/
+  staging/
+  curated/
 ```
 
 ## Quickstart
@@ -51,6 +51,8 @@ This sequence populates:
 - `data/raw/` with downloaded source files and fetch manifests
 - `data/staging/` with parsed source-specific tables
 - `data/curated/` with DuckDB, Parquet, QA reports, view exports, and plots
+
+`data/` is intentionally local-only and is not tracked in GitHub. The repository tracks code, configs, and documentation needed to rebuild it.
 
 ## Commands
 
