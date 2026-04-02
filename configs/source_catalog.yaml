@@ -74,54 +74,54 @@ sources:
     layer: soil
     organization: European Commission Joint Research Centre
     country_or_region: EU
-    access_type: csv
-    source_url: https://esdac.jrc.ec.europa.eu/projects/lucas
-    license_or_terms: Review ESDAC download terms and attribution requirements.
-    retrieval_method: direct_file_download
+    access_type: html
+    source_url: https://esdac.jrc.ec.europa.eu/content/lucas-heavy-metals
+    license_or_terms: Review ESDAC download terms and attribution requirements; heavy metals access is approval-based.
+    retrieval_method: metadata_download_and_access_review
     priority: tier_2
-    parser_class: null
-    status: planned
-    maturity: inventory_only
-    notes: Strong European soil candidate for cadmium coverage across EU member states.
+    parser_class: EsdacLucasSoilAdapter
+    status: implemented
+    maturity: official_inventory_gated_data
+    notes: Official metadata captured; public page states heavy-metals downloads are processed manually after approval.
   - source_id: gemas_soil
     source_name: GEMAS agricultural and grazing land geochemistry
     layer: soil
     organization: EuroGeoSurveys GEMAS project
     country_or_region: Europe
-    access_type: pdf
+    access_type: html
     source_url: https://gemas.eurogeosurveys.org/
     license_or_terms: Review GEMAS access and attribution terms.
-    retrieval_method: atlas_download
+    retrieval_method: official_portal_inventory
     priority: tier_2
-    parser_class: null
-    status: planned
-    maturity: inventory_only
-    notes: European soil geochemistry source with cadmium-relevant atlas and supporting materials.
+    parser_class: GemasSoilAdapter
+    status: implemented
+    maturity: official_inventory_portal
+    notes: Official GEMAS inventory captured; reproducible cadmium export path still needs portal/product-centre resolution.
   - source_id: uk_fsa_total_diet
     source_name: UK Food Standards Agency Total Diet Study
     layer: food
     organization: UK Food Standards Agency
     country_or_region: UK
-    access_type: html
-    source_url: https://www.food.gov.uk/research/research-projects/total-diet-study
+    access_type: xlsx
+    source_url: https://www.food.gov.uk/research/chemical-hazards-in-food-and-feed/total-diet-study-metals-and-other-elements
     license_or_terms: Review UK FSA terms and downloadable table availability.
-    retrieval_method: report_download
+    retrieval_method: direct_file_download
     priority: tier_2
-    parser_class: null
-    status: planned
-    maturity: inventory_only
-    notes: European food cadmium candidate complementary to FDA TDS.
+    parser_class: UkFsaTotalDietAdapter
+    status: implemented
+    maturity: summary_stats_staged
+    notes: Official Excel parsed into staged cadmium exposure summaries by food group and age class; kept separate from individual-row tables.
   - source_id: hbm4eu_parc_cadmium
     source_name: HBM4EU and PARC cadmium biomonitoring summaries
     layer: blood
     organization: HBM4EU / PARC
     country_or_region: EU
     access_type: dashboard
-    source_url: https://www.hbm4eu.eu/
+    source_url: https://www.hbm4eu.eu/hbm4eu-substances/cadmium/
     license_or_terms: Review dashboard terms; many outputs are summary statistics rather than row-level data.
-    retrieval_method: dashboard_summary
+    retrieval_method: dashboard_inventory_and_policy_pdf
     priority: tier_2
-    parser_class: null
-    status: planned
-    maturity: summary_stats_only
-    notes: European biomonitoring layer; keep separate from individual-row sources unless row-level exports are available.
+    parser_class: Hbm4euParcCadmiumAdapter
+    status: implemented
+    maturity: summary_stats_inventory
+    notes: Official dashboard metadata and cadmium policy brief captured; dashboard page explicitly notes that the summary-statistics file is available on request.

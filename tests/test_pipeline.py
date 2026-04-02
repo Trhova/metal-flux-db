@@ -11,6 +11,7 @@ from cadmium_lake.io import read_duckdb_table
 from cadmium_lake.normalize.pipeline import run_normalization
 from cadmium_lake.pipeline import fetch_sources, initialize_catalog_tables, parse_sources, run_literature_search
 from cadmium_lake.qa.checks import run_qa_checks
+from cadmium_lake.sources.europe import extract_tableau_metadata, extract_uk_fsa_cadmium_rows
 from cadmium_lake.sources import SOURCE_REGISTRY
 from cadmium_lake.viz.views import build_views
 
@@ -151,6 +152,39 @@ def test_literature_curated_extractors(monkeypatch):
     raw = read_duckdb_table("measurements_raw").join(samples.select("sample_id"), on="sample_id", how="inner")
     assert samples.height >= 2
     assert raw.height >= 2
+
+
+def test_uk_fsa_summary_extractor(tmp_path):
+    path = tmp_path / "uk_fsa.xlsx"
+    frame = pd.DataFrame(
+        [
+            [None, "Al", "Cd", "Zn"],
+            ["Bread", "1.0", "0.024", "12"],
+            ["Fish", "0.8", "0-0.0062", "3.1"],
+        ],
+        columns=["Food Group", "Mean Exposure (µg/kg bw/d)", "Unnamed: 2", "Unnamed: 3"],
+    )
+    with pd.ExcelWriter(path) as writer:
+        frame.to_excel(writer, sheet_name="Age class 19 to adult", index=False)
+    rows = extract_uk_fsa_cadmium_rows(path)
+    assert len(rows) == 2
+    assert rows[0]["raw_unit"] == "ug/kg_bw/day"
+    assert rows[0]["analyte_name"] == "cadmium"
+
+
+def test_tableau_metadata_extractor():
+    html = """
+    <html><body>
+    <object class="tableauViz">
+      <param name="host_url" value="https://report.vito.be/">
+      <param name="site_root" value="/t/EU-HBM">
+      <param name="name" value="EuropeanHumanBioMonitoringData/HBM4EU">
+    </object>
+    </body></html>
+    """
+    metadata = extract_tableau_metadata(html)
+    assert metadata["host_url"] == "https://report.vito.be/"
+    assert metadata["name"] == "EuropeanHumanBioMonitoringData/HBM4EU"
 
 
 def test_normalize_qa_and_views():
