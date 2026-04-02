@@ -12,6 +12,17 @@ VIEW_SQL = {
           s.matrix_group AS layer,
           n.canonical_unit,
           n.canonical_value,
+          CASE
+            WHEN s.matrix_group IN ('fertilizer', 'soil', 'plant', 'food') AND n.canonical_unit = 'mg/kg' THEN n.canonical_value
+            WHEN s.matrix_group = 'gut' AND n.canonical_unit = 'fraction' THEN n.canonical_value * 100.0
+            ELSE n.canonical_value
+          END AS display_value,
+          CASE
+            WHEN s.matrix_group IN ('fertilizer', 'soil', 'plant', 'food') AND n.canonical_unit = 'mg/kg' THEN 'ppm'
+            WHEN s.matrix_group = 'gut' AND n.canonical_unit = 'fraction' THEN 'bioaccessible %'
+            WHEN n.canonical_unit = 'ug/kg_bw/day' THEN 'ug/kg bw/day'
+            ELSE n.canonical_unit
+          END AS display_unit,
           CASE WHEN n.canonical_value > 0 THEN log10(n.canonical_value) ELSE NULL END AS log10_canonical_value
         FROM measurements_normalized n
         JOIN measurements_raw r USING (measurement_id)
@@ -23,16 +34,34 @@ VIEW_SQL = {
         SELECT
           src.source_id,
           src.layer,
-          COUNT(DISTINCT sam.sample_id) AS sample_count,
-          COUNT(DISTINCT raw.measurement_id) AS measurement_count,
-          MIN(st.year_start) AS min_year,
-          MAX(st.year_end) AS max_year,
-          COUNT(DISTINCT sam.country) AS country_count
+          COALESCE(sam.sample_count, 0) AS sample_count,
+          COALESCE(raw.measurement_count, 0) AS measurement_count,
+          COALESCE(sm.summary_measurement_count, 0) AS summary_measurement_count,
+          yrs.min_year,
+          yrs.max_year,
+          COALESCE(sam.country_count, 0) AS country_count
         FROM sources src
-        LEFT JOIN samples sam USING (source_id)
-        LEFT JOIN measurements_raw raw USING (sample_id)
-        LEFT JOIN studies_or_batches st USING (study_id)
-        GROUP BY 1, 2
+        LEFT JOIN (
+          SELECT source_id, COUNT(DISTINCT sample_id) AS sample_count, COUNT(DISTINCT country) AS country_count
+          FROM samples
+          GROUP BY 1
+        ) sam USING (source_id)
+        LEFT JOIN (
+          SELECT source_id, COUNT(DISTINCT measurement_id) AS measurement_count
+          FROM measurements_raw
+          JOIN samples USING (sample_id)
+          GROUP BY 1
+        ) raw USING (source_id)
+        LEFT JOIN (
+          SELECT source_id, COUNT(DISTINCT summary_measurement_id) AS summary_measurement_count
+          FROM summary_measurements
+          GROUP BY 1
+        ) sm USING (source_id)
+        LEFT JOIN (
+          SELECT source_id, MIN(year_start) AS min_year, MAX(year_end) AS max_year
+          FROM studies_or_batches
+          GROUP BY 1
+        ) yrs USING (source_id)
     """,
     "soil_plant_pairs_view": """
         CREATE OR REPLACE VIEW soil_plant_pairs_view AS
@@ -69,14 +98,27 @@ VIEW_SQL = {
     "chain_summary_view": """
         CREATE OR REPLACE VIEW chain_summary_view AS
         SELECT
-          s.matrix_group AS layer,
-          COUNT(DISTINCT s.sample_id) AS samples,
-          COUNT(DISTINCT r.measurement_id) AS measurements,
-          COUNT(DISTINCT n.measurement_id) FILTER (WHERE n.canonical_value IS NOT NULL) AS normalized_measurements
-        FROM samples s
-        LEFT JOIN measurements_raw r USING (sample_id)
-        LEFT JOIN measurements_normalized n USING (measurement_id)
-        GROUP BY 1
+          layer,
+          COALESCE(samples, 0) AS samples,
+          COALESCE(measurements, 0) AS measurements,
+          COALESCE(normalized_measurements, 0) AS normalized_measurements,
+          COALESCE(summary_measurements, 0) AS summary_measurements
+        FROM (
+          SELECT
+            matrix_group AS layer,
+            COUNT(DISTINCT sample_id) AS samples,
+            COUNT(DISTINCT measurement_id) AS measurements,
+            COUNT(DISTINCT measurement_id) FILTER (WHERE canonical_value IS NOT NULL) AS normalized_measurements
+          FROM samples
+          LEFT JOIN measurements_raw USING (sample_id)
+          LEFT JOIN measurements_normalized USING (measurement_id)
+          GROUP BY 1
+        ) base
+        FULL OUTER JOIN (
+          SELECT matrix_group AS layer, COUNT(DISTINCT summary_measurement_id) AS summary_measurements
+          FROM summary_measurements
+          GROUP BY 1
+        ) summary USING (layer)
         ORDER BY 1
     """,
 }

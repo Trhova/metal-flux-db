@@ -17,6 +17,7 @@ from cadmium_lake.models import (
     SourceFileRecord,
     SourceRecord,
     StudyRecord,
+    SummaryMeasurementRecord,
 )
 from cadmium_lake.paths import RAW_DIR, STAGING_DIR
 from cadmium_lake.utils import now_utc, sha256_file, stable_id
@@ -28,6 +29,7 @@ class ParsedPayload:
     studies_or_batches: list[StudyRecord] = field(default_factory=list)
     samples: list[SampleRecord] = field(default_factory=list)
     measurements_raw: list[RawMeasurementRecord] = field(default_factory=list)
+    summary_measurements: list[SummaryMeasurementRecord] = field(default_factory=list)
     linkage_edges: list[LinkageEdgeRecord] = field(default_factory=list)
     review_queue: list[ReviewQueueRecord] = field(default_factory=list)
 

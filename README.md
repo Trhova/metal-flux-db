@@ -69,9 +69,15 @@ cadmium-lake build-views --with-plots
 
 - DuckDB database: `data/curated/cadmium_lake.duckdb`
 - Parquet mirrors for canonical tables in `data/curated/parquet/`
+- Summary statistics table: `summary_measurements`
 - QA reports in `data/curated/qa/`
 - Gold analytical views in DuckDB plus `data/curated/views/`
 - Minimal exploration notebook: `notebooks/exploration.ipynb`
+
+Plots use intelligible display units where possible:
+- solids are shown as `ppm` when the canonical unit is `mg/kg`
+- blood remains `ug/L`
+- gut summaries use `ug/day`, `ug/kg bw/day`, or `bioaccessible %`
 
 ## Documentation
 

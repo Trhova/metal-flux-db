@@ -103,6 +103,31 @@ class NormalizedMeasurementRecord(BaseModel):
     derivation_notes: str | None = None
 
 
+class SummaryMeasurementRecord(BaseModel):
+    summary_measurement_id: str
+    source_id: str
+    study_id: str | None = None
+    matrix_group: str
+    matrix_subtype: str | None = None
+    analyte_name: str
+    statistic_name: str
+    subgroup: str | None = None
+    item_label: str | None = None
+    raw_value_text: str
+    summary_value: float | None = None
+    lower_value: float | None = None
+    upper_value: float | None = None
+    summary_unit: str | None = None
+    summary_dimension: str | None = None
+    raw_basis_text: str | None = None
+    page_or_sheet: str | None = None
+    table_or_figure: str | None = None
+    extraction_method: str
+    confidence_score: float = Field(default=1.0, ge=0.0, le=1.0)
+    derived_flag: bool = False
+    notes: str | None = None
+
+
 class LinkageEdgeRecord(BaseModel):
     edge_id: str
     from_sample_id: str

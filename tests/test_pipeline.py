@@ -7,11 +7,17 @@ import pandas as pd
 import polars as pl
 import pyreadstat
 
+from cadmium_lake import paths
 from cadmium_lake.io import read_duckdb_table
 from cadmium_lake.normalize.pipeline import run_normalization
 from cadmium_lake.pipeline import fetch_sources, initialize_catalog_tables, parse_sources, run_literature_search
 from cadmium_lake.qa.checks import run_qa_checks
-from cadmium_lake.sources.europe import extract_tableau_metadata, extract_uk_fsa_cadmium_rows
+from cadmium_lake.sources.europe import (
+    extract_hbm4eu_cadmium_summaries,
+    extract_tableau_metadata,
+    extract_uk_fsa_cadmium_rows,
+    parse_numeric_text,
+)
 from cadmium_lake.sources import SOURCE_REGISTRY
 from cadmium_lake.viz.views import build_views
 
@@ -123,10 +129,18 @@ def test_literature_curated_extractors(monkeypatch):
             return """
             <html><body>
             <table>
-              <tr><th>Site</th><th colspan="3">Cd Concentrations</th></tr>
-              <tr><th>Site</th><th>TCd-S</th><th>ACd-S</th><th>TCd-G (mg/kg)</th></tr>
-              <tr><td>MC</td><td>2.00 ± 0.10 c</td><td>1.26 ± 0.08 c</td><td>0.13 ± 0.03 b</td></tr>
-              <tr><td>SC1</td><td>3.29 ± 0.13 a</td><td>2.12 ± 0.09 b</td><td>0.16 ± 0.04 b</td></tr>
+              <tr>
+                <th>Site</th><th colspan="4">Soil</th><th colspan="4">Rice grain</th>
+              </tr>
+              <tr>
+                <th>Site</th><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th><th>F</th><th>G</th><th>TCd-G (mg/kg)</th>
+              </tr>
+              <tr>
+                <td>MC</td><td>x</td><td>x</td><td>x</td><td>x</td><td>x</td><td>x</td><td>x</td><td>0.13 ± 0.03 b</td>
+              </tr>
+              <tr>
+                <td>SC1</td><td>x</td><td>x</td><td>x</td><td>x</td><td>x</td><td>x</td><td>x</td><td>0.16 ± 0.04 b</td>
+              </tr>
             </table>
             </body></html>
             """
@@ -187,6 +201,49 @@ def test_tableau_metadata_extractor():
     assert metadata["name"] == "EuropeanHumanBioMonitoringData/HBM4EU"
 
 
+def test_parse_numeric_text():
+    assert parse_numeric_text("0-0.0062") == {"value": None, "lower": 0.0, "upper": 0.0062}
+    assert parse_numeric_text("0.024") == {"value": 0.024, "lower": None, "upper": None}
+
+
+def test_hbm4eu_summary_extractor():
+    text = (
+        "The mean exposure of adults in Europe and North America through food is 10-20 µg Cd/day, "
+        "which results in blood concentrations of 0.5-1.0 µgCd/L for non-smokers (twice as high in smokers). "
+        "In blood, reference value is below 1 μg/L for adults."
+    )
+    rows = extract_hbm4eu_cadmium_summaries("hbm4eu_parc_cadmium", "study1", text)
+    assert len(rows) >= 3
+    smoker = next(row for row in rows if row.subgroup == "Adults smokers")
+    assert smoker.derived_flag is True
+    assert smoker.lower_value == 1.0
+    assert smoker.upper_value == 2.0
+    reference = next(row for row in rows if row.statistic_name == "reference_value_upper_bound")
+    assert reference.summary_value is None
+    assert reference.upper_value == 1.0
+
+
+def test_uk_fsa_parse_writes_summary_measurements():
+    initialize_catalog_tables()
+    raw_dir = paths.RAW_DIR / "uk_fsa_total_diet"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    frame = pd.DataFrame(
+        [
+            [None, "Al", "Cd", "Zn"],
+            ["Bread", "1.0", "0.024", "12"],
+            ["Fish", "0.8", "0-0.0062", "3.1"],
+        ],
+        columns=["Food Group", "Mean Exposure (µg/kg bw/d)", "Unnamed: 2", "Unnamed: 3"],
+    )
+    with pd.ExcelWriter(raw_dir / "metals-exposure-data.xlsx") as writer:
+        frame.to_excel(writer, sheet_name="Age class 19 to adult", index=False)
+    results = parse_sources(source="uk_fsa_total_diet")
+    assert results["uk_fsa_total_diet"] >= 1
+    summary = read_duckdb_table("summary_measurements").filter(pl.col("source_id") == "uk_fsa_total_diet")
+    assert summary.height == 2
+    assert summary["matrix_group"].to_list() == ["gut", "gut"]
+
+
 def test_normalize_qa_and_views():
     initialize_catalog_tables()
     seed_washington_fixture()
@@ -204,7 +261,7 @@ def test_normalize_qa_and_views():
 
 
 def seed_washington_fixture():
-    raw_dir = Path("data/raw/washington_fertilizer")
+    raw_dir = paths.RAW_DIR / "washington_fertilizer"
     raw_dir.mkdir(parents=True, exist_ok=True)
     raw_dir.joinpath("landing.html").write_text(
         "<html><body>fixture</body></html>",
@@ -228,7 +285,7 @@ def seed_washington_fixture():
 
 
 def seed_usgs_fixture():
-    raw_dir = Path("data/raw/usgs_soil")
+    raw_dir = paths.RAW_DIR / "usgs_soil"
     raw_dir.mkdir(parents=True, exist_ok=True)
     csv_path = raw_dir / "soil.csv"
     csv_path.write_text("sample_id,latitude,longitude,cadmium_mgkg\nS1,47.1,-122.3,0.8\n", encoding="utf-8")
@@ -237,7 +294,7 @@ def seed_usgs_fixture():
 
 
 def seed_fda_fixture():
-    raw_dir = Path("data/raw/fda_tds")
+    raw_dir = paths.RAW_DIR / "fda_tds"
     raw_dir.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(raw_dir / "https:__www.fda.gov_media_151752_download", "w") as zf:
         zf.writestr(
@@ -248,7 +305,7 @@ def seed_fda_fixture():
 
 
 def seed_nhanes_fixture():
-    raw_dir = Path("data/raw/nhanes_blood_cadmium")
+    raw_dir = paths.RAW_DIR / "nhanes_blood_cadmium"
     raw_dir.mkdir(parents=True, exist_ok=True)
     frame = pd.DataFrame([{"SEQN": 1001, "LBXBCD": 0.31, "SDDSRVYR": 10}])
     pyreadstat.write_xport(frame, raw_dir / "cadmium_fixture.xpt")

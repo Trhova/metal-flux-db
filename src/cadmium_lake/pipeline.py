@@ -28,6 +28,7 @@ def initialize_catalog_tables() -> None:
         "studies_or_batches",
         "samples",
         "measurements_raw",
+        "summary_measurements",
         "measurements_normalized",
         "linkage_edges",
         "review_queue",
@@ -89,6 +90,7 @@ def parse_sources(source: str | None = None) -> dict[str, int]:
                 "studies_or_batches",
                 "samples",
                 "measurements_raw",
+                "summary_measurements",
                 "linkage_edges",
                 "review_queue",
             ]:
@@ -110,6 +112,7 @@ def parse_sources(source: str | None = None) -> dict[str, int]:
                 "studies_or_batches": ["study_id"],
                 "samples": ["sample_id"],
                 "measurements_raw": ["measurement_id"],
+                "summary_measurements": ["summary_measurement_id"],
                 "linkage_edges": ["edge_id"],
                 "review_queue": ["review_id"],
             }[table_name]
@@ -131,12 +134,16 @@ def run_literature_search(layer: str | None = None) -> dict[str, int]:
     studies = records_to_frame(record.model_dump(mode="json") for record in parsed.studies_or_batches)
     samples = records_to_frame(record.model_dump(mode="json") for record in parsed.samples)
     raw = records_to_frame(record.model_dump(mode="json") for record in parsed.measurements_raw)
+    summary_measurements = records_to_frame(
+        record.model_dump(mode="json") for record in parsed.summary_measurements
+    )
     linkage = records_to_frame(record.model_dump(mode="json") for record in parsed.linkage_edges)
     review = records_to_frame(record.model_dump(mode="json") for record in parsed.review_queue)
     existing_source_files = read_duckdb_table("source_files")
     existing_studies = read_duckdb_table("studies_or_batches")
     existing_samples = read_duckdb_table("samples")
     existing_raw = read_duckdb_table("measurements_raw")
+    existing_summary_measurements = read_duckdb_table("summary_measurements")
     existing_linkage = read_duckdb_table("linkage_edges")
     existing_review = read_duckdb_table("review_queue")
     if source_files.is_empty() and not existing_source_files.is_empty():
@@ -165,6 +172,14 @@ def run_literature_search(layer: str | None = None) -> dict[str, int]:
         raw = pl.concat([existing_raw, raw], how="diagonal_relaxed").unique(subset=["measurement_id"], keep="last")
     elif raw.is_empty():
         raw = empty_table_frame("measurements_raw")
+    if summary_measurements.is_empty() and not existing_summary_measurements.is_empty():
+        summary_measurements = existing_summary_measurements
+    elif not existing_summary_measurements.is_empty() and not summary_measurements.is_empty():
+        summary_measurements = pl.concat(
+            [existing_summary_measurements, summary_measurements], how="diagonal_relaxed"
+        ).unique(subset=["summary_measurement_id"], keep="last")
+    elif summary_measurements.is_empty():
+        summary_measurements = empty_table_frame("summary_measurements")
     if linkage.is_empty() and not existing_linkage.is_empty():
         linkage = existing_linkage
     elif not existing_linkage.is_empty() and not linkage.is_empty():
@@ -185,6 +200,8 @@ def run_literature_search(layer: str | None = None) -> dict[str, int]:
     write_parquet_table("samples", samples)
     write_duckdb_table("measurements_raw", raw)
     write_parquet_table("measurements_raw", raw)
+    write_duckdb_table("summary_measurements", summary_measurements)
+    write_parquet_table("summary_measurements", summary_measurements)
     write_duckdb_table("linkage_edges", linkage)
     write_parquet_table("linkage_edges", linkage)
     write_duckdb_table("review_queue", review)
@@ -194,5 +211,6 @@ def run_literature_search(layer: str | None = None) -> dict[str, int]:
         "studies_or_batches": studies.height,
         "samples": samples.height,
         "measurements_raw": raw.height,
+        "summary_measurements": summary_measurements.height,
         "review_queue": review.height,
     }

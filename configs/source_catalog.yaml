@@ -82,7 +82,7 @@ sources:
     parser_class: EsdacLucasSoilAdapter
     status: implemented
     maturity: official_inventory_gated_data
-    notes: Official metadata captured; public page states heavy-metals downloads are processed manually after approval.
+    notes: Official metadata captured; public page states heavy-metals downloads are processed manually after approval, while the publicly accessible LUCAS 2018 topsoil zip was inspected and does not expose cadmium columns.
   - source_id: gemas_soil
     source_name: GEMAS agricultural and grazing land geochemistry
     layer: soil
@@ -96,7 +96,7 @@ sources:
     parser_class: GemasSoilAdapter
     status: implemented
     maturity: official_inventory_portal
-    notes: Official GEMAS inventory captured; reproducible cadmium export path still needs portal/product-centre resolution.
+    notes: Official GEMAS inventory captured; public ArcGIS REST exposes GEMAS parameter/supporting layers, but no public single-element cadmium service was found in the published geochemistry service catalog.
   - source_id: uk_fsa_total_diet
     source_name: UK Food Standards Agency Total Diet Study
     layer: food
@@ -110,7 +110,7 @@ sources:
     parser_class: UkFsaTotalDietAdapter
     status: implemented
     maturity: summary_stats_staged
-    notes: Official Excel parsed into staged cadmium exposure summaries by food group and age class; kept separate from individual-row tables.
+    notes: Official Excel parsed into summary_measurements rows for cadmium exposure by food group and age class; kept separate from individual-row tables.
   - source_id: hbm4eu_parc_cadmium
     source_name: HBM4EU and PARC cadmium biomonitoring summaries
     layer: blood
@@ -124,4 +124,4 @@ sources:
     parser_class: Hbm4euParcCadmiumAdapter
     status: implemented
     maturity: summary_stats_inventory
-    notes: Official dashboard metadata and cadmium policy brief captured; dashboard page explicitly notes that the summary-statistics file is available on request.
+    notes: Official dashboard metadata and cadmium substance page/policy brief captured; dashboard page explicitly notes that the summary-statistics file is available on request.

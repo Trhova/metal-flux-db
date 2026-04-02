@@ -19,6 +19,7 @@ def run_qa_checks() -> dict[str, Path]:
     samples = read_duckdb_table("samples")
     raw = read_duckdb_table("measurements_raw")
     normalized = read_duckdb_table("measurements_normalized")
+    summary = read_duckdb_table("summary_measurements")
     source_files = read_duckdb_table("source_files")
 
     outputs: dict[str, Path] = {}
@@ -64,4 +65,22 @@ def run_qa_checks() -> dict[str, Path]:
 
     hash_report = source_files.select(["file_id", "source_id", "sha256", "local_path"]) if not source_files.is_empty() else pl.DataFrame()
     outputs["source_hash_stability_report"] = _write("source_hash_stability_report", hash_report)
+
+    summary_report = (
+        summary.select(
+            [
+                "summary_measurement_id",
+                "source_id",
+                "matrix_group",
+                "statistic_name",
+                "summary_unit",
+                "summary_value",
+                "lower_value",
+                "upper_value",
+            ]
+        )
+        if not summary.is_empty()
+        else pl.DataFrame()
+    )
+    outputs["summary_measurement_report"] = _write("summary_measurement_report", summary_report)
     return outputs
