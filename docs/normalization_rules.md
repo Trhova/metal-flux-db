@@ -26,14 +26,12 @@ Preserve and normalize basis into explicit categories:
 
 Moisture conversions are allowed only when moisture metadata is present and traceable.
 
-## Gut layer
+## Matrix endpoints
 
-Canonical gut metrics are limited to:
+- `fertilizer`, `soil`, `plant`, `food`, and `feces` normalize to canonical `mg/kg`
+- `blood` normalizes to canonical `ug/L`
 
-- `ug/day`
-- `ug/kg_bw/day`
-
-Bioaccessibility and bioavailability are retained when directly reported.
+For cross-layer comparison plots, solid matrices use `ppm` as the display unit and blood uses an approximate `ppm-equivalent` of `ug/L / 1000`.
 
 ## Blood layer
 

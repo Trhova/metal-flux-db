@@ -50,7 +50,7 @@ def parse(source: str | None = typer.Option(default=None, help="Single source id
 
 @app.command("literature-search")
 def literature_search(
-    layer: str | None = typer.Option(default=None, help="Limit search to plant or gut"),
+    layer: str | None = typer.Option(default=None, help="Limit search to plant or feces"),
 ) -> None:
     results = run_literature_search(layer=layer)
     for name, count in results.items():
@@ -77,7 +77,7 @@ def qa() -> None:
 
 @app.command("build-views")
 def build_views_command(
-    with_plots: bool = typer.Option(default=True, help="Build simple exploratory plots")
+    with_plots: bool = typer.Option(default=True, help="Build interactive Plotly exploratory plots")
 ) -> None:
     build_views()
     typer.echo("views built")

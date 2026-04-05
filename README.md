@@ -74,10 +74,10 @@ cadmium-lake build-views --with-plots
 - Gold analytical views in DuckDB plus `data/curated/views/`
 - Minimal exploration notebook: `notebooks/exploration.ipynb`
 
-Plots use intelligible display units where possible:
-- solids are shown as `ppm` when the canonical unit is `mg/kg`
-- blood remains `ug/L`
-- gut summaries use `ug/day`, `ug/kg bw/day`, or `bioaccessible %`
+Plot outputs are written to `data/curated/plots/` as both interactive `html` and static `pdf`:
+- solid matrices including `feces` are shown as `ppm` when the canonical unit is `mg/kg`
+- blood remains `ug/L` in matrix-specific plots
+- cross-layer comparison uses `ppm-equivalent`, with blood approximated as `ug/L / 1000`
 
 ## Documentation
 

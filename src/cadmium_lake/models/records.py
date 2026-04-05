@@ -40,6 +40,7 @@ class StudyRecord(BaseModel):
     study_title: str | None = None
     year_start: int | None = None
     year_end: int | None = None
+    publication_year: int | None = None
     country: str | None = None
     citation: str | None = None
     doi: str | None = None
@@ -64,6 +65,10 @@ class SampleRecord(BaseModel):
     longitude: float | None = None
     country: str | None = None
     collection_date: str | None = None
+    collection_year: int | None = None
+    publication_year: int | None = None
+    year_for_plotting: int | None = None
+    year_for_plotting_source: str | None = None
     analyte_method: str | None = None
     lod: float | None = None
     loq: float | None = None

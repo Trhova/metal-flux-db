@@ -33,6 +33,9 @@ class UsgsSoilAdapter(BaseAdapter):
             study_id=stable_id(self.source_id, "ds801"),
             source_id=self.source_id,
             study_title="USGS soil geochemical representative slice",
+            year_start=2013,
+            year_end=2013,
+            publication_year=2013,
             citation="USGS Data Series 801",
             country="US",
             notes="Representative cadmium-bearing soil table from USGS geochemical release.",
@@ -64,6 +67,9 @@ class UsgsSoilAdapter(BaseAdapter):
                     latitude=try_float(lowered.get("latitude")),
                     longitude=try_float(lowered.get("longitude")),
                     country="US",
+                    publication_year=study.publication_year,
+                    year_for_plotting=study.publication_year,
+                    year_for_plotting_source="publication_year",
                     comments="Parsed from USGS soil geochemical file",
                 )
             )

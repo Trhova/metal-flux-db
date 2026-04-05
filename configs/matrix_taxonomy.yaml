@@ -7,7 +7,7 @@ matrix_groups:
     canonical_units: ["mg/kg", "ug/kg"]
   food:
     canonical_units: ["mg/kg", "ug/kg"]
-  gut:
-    canonical_units: ["ug/day", "ug/kg_bw/day"]
+  feces:
+    canonical_units: ["mg/kg", "ug/kg"]
   blood:
     canonical_units: ["ug/L"]

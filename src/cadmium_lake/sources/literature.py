@@ -18,24 +18,28 @@ class LiteratureSearchAdapter(BaseAdapter):
     THEMES = {
         "plant": [
             "cadmium rice grain concentration",
-            "cadmium wheat grain uptake",
-            "cadmium potato tuber concentration",
-            "cadmium leafy vegetable uptake",
-            "cadmium cocoa bean concentration",
-            "soil plant transfer factor cadmium",
+            "cadmium wheat grain concentration",
+            "cadmium leafy vegetables mg/kg",
+            "cadmium cocoa beans concentration",
+            "cadmium potato concentration",
+            "cadmium edible plant cadmium concentration",
         ],
-        "gut": [
-            "cadmium bioaccessibility INFOGEST",
-            "cadmium PBET UBM",
-            "cadmium duplicate diet cadmium",
-            "cadmium Caco-2 dietary bioavailability",
-            "cadmium bioaccessibility food cadmium",
+        "feces": [
+            "fecal cadmium concentration",
+            "stool cadmium concentration",
+            "cadmium in feces mg/kg",
+            "human feces cadmium",
+        ],
+        "fertilizer": [
+            "phosphate fertilizer cadmium",
+            "fertilizer heavy metals cadmium product concentration",
         ],
     }
 
     CURATED_TARGETS = {
         "PMC12733840": {"layer": "plant", "search_query": "cadmium rice grain concentration"},
-        "PMC12846066": {"layer": "gut", "search_query": "cadmium bioaccessibility food cadmium"},
+        "PMC13025951": {"layer": "plant", "search_query": "cadmium wheat grain concentration"},
+        "PMC12137722": {"layer": "feces", "search_query": "stool cadmium concentration"},
     }
 
     def fetch(self) -> list:
@@ -70,6 +74,7 @@ class LiteratureSearchAdapter(BaseAdapter):
                     study_title=item.get("title"),
                     year_start=item.get("year"),
                     year_end=item.get("year"),
+                    publication_year=item.get("year"),
                     country=item.get("country"),
                     citation=item.get("source_api"),
                     doi=item.get("doi"),
@@ -296,8 +301,10 @@ class LiteratureSearchAdapter(BaseAdapter):
                 payload.source_files.append(self._write_raw_file(filename, link, self._download(link)))
         if pmcid == "PMC12733840":
             records = self._extract_rice_grain_table(item, soup, payload)
-        elif pmcid == "PMC12846066":
-            records = self._extract_bioaccessibility_table(item, soup, payload)
+        elif pmcid == "PMC13025951":
+            records = self._extract_cereal_region_tables(item, soup, payload)
+        elif pmcid == "PMC12137722":
+            records = self._extract_stool_summary_records(item, soup, payload)
         else:
             records = 0
         item["review_needed"] = bool(supplement_links)
@@ -336,6 +343,9 @@ class LiteratureSearchAdapter(BaseAdapter):
                     dry_wet_basis=None,
                     location_name=site,
                     country="China",
+                    publication_year=item.get("year"),
+                    year_for_plotting=item.get("year"),
+                    year_for_plotting_source="publication_year" if item.get("year") else None,
                     analyte_method=None,
                     comments=f"Parsed from {item.get('pmcid')} Table 1 TCd-G column",
                 )
@@ -362,63 +372,127 @@ class LiteratureSearchAdapter(BaseAdapter):
             count += 1
         return count
 
-    def _extract_bioaccessibility_table(
-        self,
-        item: dict,
-        soup: BeautifulSoup,
-        payload: ParsedPayload,
-    ) -> int:
+    def _extract_cereal_region_tables(self, item: dict, soup: BeautifulSoup, payload: ParsedPayload) -> int:
+        table_map = {
+            18: ("barley", "Barley", "Hordeum vulgare L."),
+            19: ("wheat", "Wheat", "Triticum aestivum L."),
+            20: ("maize", "Maize", "Zea mays L."),
+        }
         tables = soup.find_all("table")
-        if len(tables) < 2:
-            return 0
-        table = tables[1]
-        rows = table.find_all("tr")
         count = 0
-        for row in rows[2:]:
-            cells = row.find_all(["td", "th"])
-            if len(cells) < 2:
+        for table_number, (matrix_subtype, crop_label, specimen) in table_map.items():
+            if len(tables) < table_number:
                 continue
-            species = clean_text(cells[0].get_text(" ", strip=True))
-            value_text = clean_text(cells[1].get_text(" ", strip=True))
-            if not species or not value_text:
-                continue
-            sample_id = stable_id(item["study_id"], "gut", species, "bioaccessibility")
-            payload.samples.append(
-                SampleRecord(
-                    sample_id=sample_id,
-                    source_id=self.source_id,
-                    study_id=item["study_id"],
-                    matrix_group="gut",
-                    matrix_subtype="in_vitro_bioaccessibility",
-                    sample_name=f"{species} cadmium bioaccessibility",
-                    specimen_or_part="fruiting_body",
-                    country="China",
-                    analyte_method="biomimetic digestion",
-                    comments=f"Parsed from {item.get('pmcid')} Table 2 biological accessibility column",
+            table = tables[table_number - 1]
+            rows = table.find_all("tr")
+            region = None
+            for row in rows[1:]:
+                cells = [clean_text(cell.get_text(" ", strip=True)) for cell in row.find_all(["td", "th"])]
+                cells = [cell for cell in cells if cell]
+                if not cells:
+                    continue
+                if "(n =" in cells[0]:
+                    region = cells[0].split("(n =", 1)[0].strip()
+                    continue
+                if not region or not cells[0].lower().startswith("mean"):
+                    continue
+                if len(cells) < 4:
+                    continue
+                cd_text = cells[2]
+                value = parse_first_numeric(cd_text)
+                if value is None:
+                    continue
+                sample_id = stable_id(item["study_id"], matrix_subtype, region, "mean")
+                payload.samples.append(
+                    SampleRecord(
+                        sample_id=sample_id,
+                        source_id=self.source_id,
+                        study_id=item["study_id"],
+                        matrix_group="plant",
+                        matrix_subtype=matrix_subtype,
+                        sample_name=f"{crop_label} mean cadmium concentration in {region}",
+                        specimen_or_part=specimen,
+                        dry_wet_basis="dry_weight",
+                        country="Croatia",
+                        publication_year=item.get("year"),
+                        year_for_plotting=item.get("year"),
+                        year_for_plotting_source="publication_year" if item.get("year") else None,
+                        comments=f"Parsed from {item.get('pmcid')} Table {table_number} mean Cd concentration",
+                    )
                 )
-            )
-            nondetect = value_text.upper() == "N"
-            payload.measurements_raw.append(
-                RawMeasurementRecord(
-                    measurement_id=stable_id(sample_id, "cadmium", "bioaccessible_fraction"),
-                    sample_id=sample_id,
-                    analyte_name="cadmium",
-                    raw_value=None if nondetect else parse_first_numeric(value_text),
-                    raw_value_text=value_text,
-                    raw_unit="%",
-                    nondetect_flag=nondetect,
-                    detection_qualifier="N" if nondetect else None,
-                    raw_basis_text="bioaccessible_fraction",
-                    page_or_sheet=item.get("pmcid"),
-                    table_or_figure="Table 2",
-                    row_label=species,
-                    column_label="Biological Accessibility of Cadmium (%)",
-                    extraction_method="pmc_html_table_specific",
-                    confidence_score=0.94,
+                payload.measurements_raw.append(
+                    RawMeasurementRecord(
+                        measurement_id=stable_id(sample_id, "cadmium", "mean"),
+                        sample_id=sample_id,
+                        analyte_name="cadmium",
+                        raw_value=value,
+                        raw_value_text=cd_text,
+                        raw_unit="mg/kg",
+                        nondetect_flag=False,
+                        detection_qualifier=None,
+                        raw_basis_text="dry weight",
+                        page_or_sheet=item.get("pmcid"),
+                        table_or_figure=f"Table {table_number}",
+                        row_label=region,
+                        column_label="Cd mean ± SD",
+                        extraction_method="pmc_html_table_summary_mean",
+                        confidence_score=0.93,
+                    )
                 )
-            )
-            count += 1
+                count += 1
         return count
+
+    def _extract_stool_summary_records(self, item: dict, soup: BeautifulSoup, payload: ParsedPayload) -> int:
+        text = clean_text(soup.get_text(" ", strip=True)) or ""
+        median_match = re.search(
+            r"medium concentrations of mercury, cadmium, lead, arsenic.*?were\s+[0-9.]+,\s+([0-9.]+),.*?μg/g",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if not median_match:
+            return 0
+        value_text = median_match.group(1)
+        value = parse_first_numeric(value_text)
+        if value is None:
+            return 0
+        sample_id = stable_id(item["study_id"], "feces", "infant_stool", "median")
+        payload.samples.append(
+            SampleRecord(
+                sample_id=sample_id,
+                source_id=self.source_id,
+                study_id=item["study_id"],
+                matrix_group="feces",
+                matrix_subtype="infant_stool",
+                sample_name="Infant stool cadmium concentration median",
+                specimen_or_part="stool",
+                dry_wet_basis=None,
+                country=None,
+                publication_year=item.get("year"),
+                year_for_plotting=item.get("year"),
+                year_for_plotting_source="publication_year" if item.get("year") else None,
+                comments=f"Parsed from narrative summary in {item.get('pmcid')}",
+            )
+        )
+        payload.measurements_raw.append(
+            RawMeasurementRecord(
+                measurement_id=stable_id(sample_id, "cadmium", "median"),
+                sample_id=sample_id,
+                analyte_name="cadmium",
+                raw_value=value,
+                raw_value_text=value_text,
+                raw_unit="ug/g",
+                nondetect_flag=False,
+                detection_qualifier=None,
+                raw_basis_text=None,
+                page_or_sheet=item.get("pmcid"),
+                table_or_figure="Results narrative",
+                row_label="infant stool",
+                column_label="cadmium median concentration",
+                extraction_method="pmc_html_narrative_summary",
+                confidence_score=0.75,
+            )
+        )
+        return 1
 
     def _dedupe_inventory(self, inventory: list[dict]) -> list[dict]:
         seen = set()

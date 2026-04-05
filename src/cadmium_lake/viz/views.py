@@ -5,29 +5,167 @@ import duckdb
 from cadmium_lake.paths import DB_PATH, VIEWS_DIR
 
 
+DIRECT_MEASUREMENT_BASE = """
+    WITH direct_measurements AS (
+      SELECT
+        n.measurement_id,
+        s.sample_id,
+        s.source_id,
+        src.source_name,
+        s.study_id,
+        st.study_title,
+        st.citation,
+        st.doi,
+        s.collection_year,
+        COALESCE(s.publication_year, st.publication_year, st.year_start, st.year_end) AS publication_year,
+        COALESCE(
+          s.year_for_plotting,
+          s.collection_year,
+          s.publication_year,
+          st.publication_year,
+          st.year_start,
+          st.year_end
+        ) AS year_for_plotting,
+        COALESCE(
+          s.year_for_plotting_source,
+          CASE
+            WHEN s.collection_year IS NOT NULL THEN 'collection_year'
+            WHEN s.publication_year IS NOT NULL OR st.publication_year IS NOT NULL OR st.year_start IS NOT NULL OR st.year_end IS NOT NULL
+              THEN 'publication_year'
+            ELSE NULL
+          END
+        ) AS year_for_plotting_source,
+        COALESCE(s.country, st.country) AS country,
+        s.matrix_group AS layer,
+        s.matrix_subtype,
+        s.sample_name,
+        s.specimen_or_part,
+        s.dry_wet_basis,
+        s.location_name,
+        r.raw_value,
+        r.raw_value_text,
+        r.raw_unit,
+        r.raw_basis_text,
+        r.page_or_sheet,
+        r.table_or_figure,
+        r.row_label,
+        r.column_label,
+        r.extraction_method,
+        r.confidence_score,
+        n.canonical_value,
+        n.canonical_unit,
+        n.canonical_dimension,
+        n.conversion_rule,
+        n.converted_from_unit,
+        n.normalized_basis,
+        CASE
+          WHEN s.matrix_group IN ('fertilizer', 'soil', 'plant', 'food', 'feces') AND n.canonical_unit = 'mg/kg' THEN n.canonical_value
+          WHEN s.matrix_group = 'blood' AND n.canonical_unit = 'ug/L' THEN n.canonical_value / 1000.0
+          ELSE NULL
+        END AS ppm_equivalent,
+        CASE
+          WHEN s.matrix_group IN ('fertilizer', 'soil', 'plant', 'food', 'feces') AND n.canonical_unit = 'mg/kg' THEN n.canonical_value
+          WHEN s.matrix_group = 'blood' AND n.canonical_unit = 'ug/L' THEN n.canonical_value
+          ELSE n.canonical_value
+        END AS display_value,
+        CASE
+          WHEN s.matrix_group IN ('fertilizer', 'soil', 'plant', 'food', 'feces') AND n.canonical_unit = 'mg/kg' THEN 'ppm'
+          WHEN s.matrix_group = 'blood' AND n.canonical_unit = 'ug/L' THEN 'ug/L'
+          ELSE n.canonical_unit
+        END AS display_unit
+      FROM measurements_normalized n
+      JOIN measurements_raw r USING (measurement_id)
+      JOIN samples s USING (sample_id)
+      LEFT JOIN studies_or_batches st USING (study_id)
+      LEFT JOIN sources src ON s.source_id = src.source_id
+      WHERE n.canonical_value IS NOT NULL
+    )
+"""
+
+
 VIEW_SQL = {
+    "layer_comparison_view": f"""
+        CREATE OR REPLACE VIEW layer_comparison_view AS
+        {DIRECT_MEASUREMENT_BASE}
+        SELECT
+          measurement_id,
+          sample_id,
+          source_id,
+          source_name,
+          study_id,
+          study_title,
+          citation,
+          doi,
+          collection_year,
+          publication_year,
+          year_for_plotting,
+          year_for_plotting_source,
+          country,
+          layer,
+          matrix_subtype,
+          sample_name,
+          specimen_or_part,
+          dry_wet_basis,
+          location_name,
+          raw_value,
+          raw_value_text,
+          raw_unit,
+          raw_basis_text,
+          page_or_sheet,
+          table_or_figure,
+          row_label,
+          column_label,
+          extraction_method,
+          confidence_score,
+          canonical_value,
+          canonical_unit,
+          canonical_dimension,
+          conversion_rule,
+          converted_from_unit,
+          normalized_basis,
+          ppm_equivalent,
+          CASE WHEN ppm_equivalent > 0 THEN log10(ppm_equivalent) END AS log10_ppm_equivalent,
+          display_value,
+          display_unit
+        FROM direct_measurements
+        WHERE ppm_equivalent IS NOT NULL
+        ORDER BY layer, ppm_equivalent
+    """,
     "layer_distribution_view": """
         CREATE OR REPLACE VIEW layer_distribution_view AS
+        SELECT *
+        FROM layer_comparison_view
+    """,
+    "time_trend_view": f"""
+        CREATE OR REPLACE VIEW time_trend_view AS
+        {DIRECT_MEASUREMENT_BASE}
         SELECT
-          s.matrix_group AS layer,
-          n.canonical_unit,
-          n.canonical_value,
-          CASE
-            WHEN s.matrix_group IN ('fertilizer', 'soil', 'plant', 'food') AND n.canonical_unit = 'mg/kg' THEN n.canonical_value
-            WHEN s.matrix_group = 'gut' AND n.canonical_unit = 'fraction' THEN n.canonical_value * 100.0
-            ELSE n.canonical_value
-          END AS display_value,
-          CASE
-            WHEN s.matrix_group IN ('fertilizer', 'soil', 'plant', 'food') AND n.canonical_unit = 'mg/kg' THEN 'ppm'
-            WHEN s.matrix_group = 'gut' AND n.canonical_unit = 'fraction' THEN 'bioaccessible %'
-            WHEN n.canonical_unit = 'ug/kg_bw/day' THEN 'ug/kg bw/day'
-            ELSE n.canonical_unit
-          END AS display_unit,
-          CASE WHEN n.canonical_value > 0 THEN log10(n.canonical_value) ELSE NULL END AS log10_canonical_value
-        FROM measurements_normalized n
-        JOIN measurements_raw r USING (measurement_id)
-        JOIN samples s USING (sample_id)
-        WHERE n.canonical_value IS NOT NULL
+          measurement_id,
+          sample_id,
+          source_id,
+          source_name,
+          study_id,
+          study_title,
+          citation,
+          doi,
+          collection_year,
+          publication_year,
+          year_for_plotting,
+          year_for_plotting_source,
+          country,
+          layer,
+          matrix_subtype,
+          canonical_unit,
+          display_value,
+          display_unit,
+          ppm_equivalent,
+          raw_value_text,
+          raw_unit,
+          page_or_sheet,
+          table_or_figure
+        FROM direct_measurements
+        WHERE year_for_plotting IS NOT NULL
+          AND display_value IS NOT NULL
     """,
     "source_coverage_view": """
         CREATE OR REPLACE VIEW source_coverage_view AS
@@ -79,46 +217,33 @@ VIEW_SQL = {
         JOIN samples s2 ON e.to_sample_id = s2.sample_id
         WHERE s1.matrix_group = 'plant' AND s2.matrix_group = 'food'
     """,
-    "food_gut_view": """
-        CREATE OR REPLACE VIEW food_gut_view AS
-        SELECT e.edge_id, e.relationship_type, s1.sample_id AS food_sample_id, s2.sample_id AS gut_sample_id
+    "food_feces_view": """
+        CREATE OR REPLACE VIEW food_feces_view AS
+        SELECT e.edge_id, e.relationship_type, s1.sample_id AS food_sample_id, s2.sample_id AS feces_sample_id
         FROM linkage_edges e
         JOIN samples s1 ON e.from_sample_id = s1.sample_id
         JOIN samples s2 ON e.to_sample_id = s2.sample_id
-        WHERE s1.matrix_group = 'food' AND s2.matrix_group = 'gut'
+        WHERE s1.matrix_group = 'food' AND s2.matrix_group = 'feces'
     """,
-    "gut_blood_view": """
-        CREATE OR REPLACE VIEW gut_blood_view AS
-        SELECT e.edge_id, e.relationship_type, s1.sample_id AS gut_sample_id, s2.sample_id AS blood_sample_id
+    "feces_blood_view": """
+        CREATE OR REPLACE VIEW feces_blood_view AS
+        SELECT e.edge_id, e.relationship_type, s1.sample_id AS feces_sample_id, s2.sample_id AS blood_sample_id
         FROM linkage_edges e
         JOIN samples s1 ON e.from_sample_id = s1.sample_id
         JOIN samples s2 ON e.to_sample_id = s2.sample_id
-        WHERE s1.matrix_group = 'gut' AND s2.matrix_group = 'blood'
+        WHERE s1.matrix_group = 'feces' AND s2.matrix_group = 'blood'
     """,
     "chain_summary_view": """
         CREATE OR REPLACE VIEW chain_summary_view AS
         SELECT
-          layer,
-          COALESCE(samples, 0) AS samples,
-          COALESCE(measurements, 0) AS measurements,
-          COALESCE(normalized_measurements, 0) AS normalized_measurements,
-          COALESCE(summary_measurements, 0) AS summary_measurements
-        FROM (
-          SELECT
-            matrix_group AS layer,
-            COUNT(DISTINCT sample_id) AS samples,
-            COUNT(DISTINCT measurement_id) AS measurements,
-            COUNT(DISTINCT measurement_id) FILTER (WHERE canonical_value IS NOT NULL) AS normalized_measurements
-          FROM samples
-          LEFT JOIN measurements_raw USING (sample_id)
-          LEFT JOIN measurements_normalized USING (measurement_id)
-          GROUP BY 1
-        ) base
-        FULL OUTER JOIN (
-          SELECT matrix_group AS layer, COUNT(DISTINCT summary_measurement_id) AS summary_measurements
-          FROM summary_measurements
-          GROUP BY 1
-        ) summary USING (layer)
+          matrix_group AS layer,
+          COUNT(DISTINCT sample_id) AS samples,
+          COUNT(DISTINCT measurement_id) AS measurements,
+          COUNT(DISTINCT measurement_id) FILTER (WHERE canonical_value IS NOT NULL) AS normalized_measurements
+        FROM samples
+        LEFT JOIN measurements_raw USING (sample_id)
+        LEFT JOIN measurements_normalized USING (measurement_id)
+        GROUP BY 1
         ORDER BY 1
     """,
 }
@@ -126,6 +251,10 @@ VIEW_SQL = {
 
 def build_views() -> None:
     VIEWS_DIR.mkdir(parents=True, exist_ok=True)
+    allowed = {f"{name}.csv" for name in VIEW_SQL}
+    for path in VIEWS_DIR.glob("*.csv"):
+        if path.name not in allowed:
+            path.unlink()
     with duckdb.connect(str(DB_PATH)) as conn:
         for name, sql in VIEW_SQL.items():
             conn.execute(sql)

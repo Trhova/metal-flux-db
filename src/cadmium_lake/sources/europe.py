@@ -192,7 +192,7 @@ class UkFsaTotalDietAdapter(BaseAdapter):
                     ),
                     source_id=self.source_id,
                     study_id=study.study_id,
-                    matrix_group="gut",
+                    matrix_group="food",
                     matrix_subtype="dietary_exposure_summary",
                     analyte_name="cadmium",
                     statistic_name=row["statistic_name"],
@@ -350,18 +350,6 @@ def normalize_uk_fsa_statistic_name(label: str) -> str:
 def extract_hbm4eu_cadmium_summaries(source_id: str, study_id: str, text: str) -> list[SummaryMeasurementRecord]:
     records: list[SummaryMeasurementRecord] = []
     patterns = [
-        (
-            "dietary_exposure_adults",
-            "gut",
-            "dietary_exposure_summary",
-            "mean_exposure",
-            "Adults in Europe and North America",
-            "Dietary exposure",
-            r"food is (\d+(?:\.\d+)?-\d+(?:\.\d+)?) µg Cd/day",
-            "ug/day",
-            "intake_mass_per_day",
-            False,
-        ),
         (
             "blood_non_smokers",
             "blood",

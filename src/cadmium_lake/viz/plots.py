@@ -1,215 +1,409 @@
 from __future__ import annotations
 
 import math
-import random
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import polars as pl
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from cadmium_lake.io import read_duckdb_table
 from cadmium_lake.paths import PLOTS_DIR
 
 
+LAYER_ORDER = ["fertilizer", "soil", "plant", "food", "feces", "blood"]
+SPARSE_LAYERS = ["fertilizer", "plant", "feces"]
+LAYER_COLORS = {
+    "fertilizer": "#395c6b",
+    "soil": "#8f5e3b",
+    "plant": "#467d4b",
+    "food": "#c4792a",
+    "feces": "#6b4f3b",
+    "blood": "#9f2f43",
+}
+INTERACTIVE_BASENAMES = {
+    "atlas_layer_comparison",
+    "atlas_matrix_distributions",
+    "atlas_time_trends",
+    "atlas_source_coverage",
+    "atlas_coverage_by_country",
+    "atlas_coverage_by_year",
+}
+STATIC_BASENAMES = {
+    "atlas_main_static",
+    "atlas_sparse_layers_static",
+    "atlas_time_trends_static",
+    "atlas_coverage_static",
+}
+
+
 def build_basic_plots() -> list[str]:
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+    _remove_stale_plot_outputs()
     outputs: list[str] = []
-    normalized = read_duckdb_table("measurements_normalized")
-    raw = read_duckdb_table("measurements_raw")
-    samples = read_duckdb_table("samples")
-    studies = read_duckdb_table("studies_or_batches")
-    summary = read_duckdb_table("summary_measurements")
 
-    point_frame = _build_point_frame(normalized, raw, samples, summary)
-    if not point_frame.is_empty():
-        outputs.append(_plot_layer_points(point_frame))
-        outputs.append(_plot_cross_layer_points(point_frame))
+    comparison = read_duckdb_table("layer_comparison_view")
+    trends = read_duckdb_table("time_trend_view")
+    coverage = read_duckdb_table("source_coverage_view")
 
-    if not samples.is_empty():
-        coverage = samples.group_by("country").len().sort("len", descending=True).head(12)
-        if not coverage.is_empty():
-            fig, ax = plt.subplots(figsize=(9, 4.5))
-            y = list(range(coverage.height))
-            ax.scatter(coverage["len"], y, s=50, color="#1f77b4")
-            ax.set_yticks(y)
-            ax.set_yticklabels(coverage["country"].fill_null("unknown"))
-            ax.set_xlabel("Sample count")
-            ax.set_title("Source coverage by geography")
-            ax.grid(axis="x", alpha=0.25)
-            path = PLOTS_DIR / "coverage_by_geography.png"
-            fig.tight_layout()
-            fig.savefig(path)
-            plt.close(fig)
-            outputs.append(str(path))
+    if not comparison.is_empty():
+        outputs.append(_plot_layer_comparison_interactive(comparison))
+        outputs.append(_plot_matrix_distributions_interactive(comparison))
+        outputs.append(_plot_country_coverage_interactive(comparison))
+        outputs.append(_plot_main_atlas_static(comparison))
+        sparse_path = _plot_sparse_layers_static(comparison)
+        if sparse_path:
+            outputs.append(sparse_path)
 
-    if not studies.is_empty():
-        years = studies.select(["study_id", "year_start"]).drop_nulls().group_by("year_start").len().sort("year_start")
-        if not years.is_empty():
-            fig, ax = plt.subplots(figsize=(9, 4.5))
-            ax.scatter(years["year_start"], years["len"], s=50, color="#d95f02")
-            ax.plot(years["year_start"], years["len"], alpha=0.4, color="#d95f02")
-            ax.set_title("Source coverage by year")
-            ax.set_xlabel("Study year")
-            ax.set_ylabel("Study count")
-            ax.grid(alpha=0.25)
-            path = PLOTS_DIR / "coverage_by_year.png"
-            fig.tight_layout()
-            fig.savefig(path)
-            plt.close(fig)
-            outputs.append(str(path))
+    if not trends.is_empty():
+        time_html = _plot_time_trends_interactive(trends)
+        if time_html:
+            outputs.append(time_html)
+        year_html = _plot_year_coverage_interactive(trends)
+        if year_html:
+            outputs.append(year_html)
+        time_pdf = _plot_time_trends_static(trends)
+        if time_pdf:
+            outputs.append(time_pdf)
+
+    if not coverage.is_empty():
+        outputs.append(_plot_source_coverage_interactive(coverage))
+        outputs.append(_plot_coverage_static(coverage, comparison, trends))
 
     return outputs
 
 
-def _build_point_frame(
-    normalized: pl.DataFrame,
-    raw: pl.DataFrame,
-    samples: pl.DataFrame,
-    summary: pl.DataFrame,
-) -> pl.DataFrame:
-    rows: list[dict[str, object]] = []
-    if not normalized.is_empty() and not raw.is_empty() and not samples.is_empty():
-        joined = (
-            normalized.join(raw.select(["measurement_id", "sample_id"]), on="measurement_id", how="inner")
-            .join(samples.select(["sample_id", "matrix_group"]), on="sample_id", how="left")
-        )
-        for record in joined.iter_rows(named=True):
-            if record["canonical_value"] is None or record["canonical_unit"] is None or record["matrix_group"] is None:
-                continue
-            display = _to_display_dict(
-                {"layer": record["matrix_group"], "value": record["canonical_value"], "unit": record["canonical_unit"]}
-            )
-            rows.append(
-                {
-                    "layer": record["matrix_group"],
-                    "value": record["canonical_value"],
-                    "unit": record["canonical_unit"],
-                    "record_type": "individual",
-                    **display,
-                }
-            )
-    if not summary.is_empty():
-        for record in summary.iter_rows(named=True):
-            value = record["summary_value"]
-            if value is None:
-                value = record["upper_value"] if record["upper_value"] is not None else record["lower_value"]
-            if value is None or record["summary_unit"] is None or record["matrix_group"] is None:
-                continue
-            display = _to_display_dict(
-                {"layer": record["matrix_group"], "value": value, "unit": record["summary_unit"]}
-            )
-            rows.append(
-                {
-                    "layer": record["matrix_group"],
-                    "value": value,
-                    "unit": record["summary_unit"],
-                    "record_type": "summary",
-                    **display,
-                }
-            )
-    if not rows:
-        return pl.DataFrame()
-    return pl.from_dicts(rows, infer_schema_length=None, strict=False)
+def _plot_layer_comparison_interactive(frame: pl.DataFrame) -> str:
+    pdf = _comparison_pdf(frame)
+    fig = px.strip(
+        pdf,
+        x="ppm_equivalent",
+        y="layer",
+        color="source_id",
+        category_orders={"layer": ordered_layers(pdf["layer"].tolist())},
+        log_x=True,
+        hover_data={
+            "canonical_value": True,
+            "canonical_unit": True,
+            "ppm_equivalent": ':.4g',
+            "country": True,
+            "year_for_plotting": True,
+            "year_for_plotting_source": True,
+            "source_id": True,
+            "study_title": True,
+            "citation": True,
+            "doi": True,
+            "raw_value_text": True,
+            "raw_unit": True,
+            "page_or_sheet": True,
+            "table_or_figure": True,
+        },
+        title="Cadmium concentration atlas",
+        labels={"ppm_equivalent": "ppm-equivalent", "layer": "matrix layer", "source_id": "source"},
+    )
+    fig.update_traces(jitter=0.32, marker={"size": 6, "opacity": 0.45})
+    fig.update_layout(height=650, template="plotly_white")
+    return _write_html(fig, "atlas_layer_comparison")
 
 
-def _to_display_dict(row: dict) -> dict[str, object]:
-    layer = row["layer"]
-    value = float(row["value"])
-    unit = str(row["unit"])
-    if layer in {"fertilizer", "soil", "plant", "food"} and unit == "mg/kg":
-        return {"display_value": value, "display_unit": "ppm", "plot_label": f"{layer} (ppm)"}
-    if layer == "gut" and unit == "fraction":
-        return {"display_value": value * 100.0, "display_unit": "bioaccessible %", "plot_label": "gut (bioaccessible %)"}
-    if unit == "ug/kg_bw/day":
-        return {"display_value": value, "display_unit": "ug/kg bw/day", "plot_label": f"{layer} (ug/kg bw/day)"}
-    return {"display_value": value, "display_unit": unit, "plot_label": f"{layer} ({unit})"}
+def _plot_matrix_distributions_interactive(frame: pl.DataFrame) -> str:
+    pdf = _comparison_pdf(frame)
+    fig = px.violin(
+        pdf,
+        x="layer",
+        y="display_value",
+        color="layer",
+        category_orders={"layer": ordered_layers(pdf["layer"].tolist())},
+        color_discrete_map=LAYER_COLORS,
+        box=True,
+        points=False,
+        hover_data={
+            "display_unit": True,
+            "ppm_equivalent": ':.4g',
+            "country": True,
+            "year_for_plotting": True,
+            "source_id": True,
+            "study_title": True,
+            "citation": True,
+            "doi": True,
+        },
+        title="Cadmium distributions by matrix",
+        labels={"display_value": "matrix-specific concentration", "layer": "matrix layer"},
+    )
+    fig.update_yaxes(type="log")
+    fig.update_layout(height=650, template="plotly_white", showlegend=False)
+    return _write_html(fig, "atlas_matrix_distributions")
 
 
-def _plot_layer_points(frame: pl.DataFrame) -> str:
-    pdf = frame.to_pandas()
-    groups = list(pdf.groupby(["layer", "display_unit"], sort=True))
-    cols = 2
-    rows = math.ceil(len(groups) / cols) or 1
-    fig, axes = plt.subplots(rows, cols, figsize=(12, max(4, rows * 3.4)))
-    axes = axes.flatten() if hasattr(axes, "flatten") else [axes]
-    rng = random.Random(7)
-    colors = {"individual": "#1f77b4", "summary": "#d95f02"}
-    for ax, ((layer, display_unit), subset) in zip(axes, groups):
-        subset = subset[subset["display_value"] > 0]
-        if subset.empty:
-            ax.set_visible(False)
-            continue
-        jitter = [rng.uniform(-0.3, 0.3) for _ in range(len(subset))]
-        for record_type, part in subset.groupby("record_type"):
-            idx = part.index
-            part_jitter = [jitter[list(subset.index).index(i)] for i in idx]
-            ax.scatter(
-                part["display_value"],
-                part_jitter,
-                s=10 if record_type == "individual" else 28,
-                alpha=0.18 if record_type == "individual" else 0.9,
-                color=colors[record_type],
-                label=record_type if record_type not in ax.get_legend_handles_labels()[1] else None,
-            )
-        ax.set_xscale("log")
-        ax.set_ylim(-0.45, 0.45)
-        ax.set_yticks([])
-        ax.set_xlabel(display_unit)
-        ax.set_title(f"{layer.capitalize()} measurements")
-        ax.grid(axis="x", alpha=0.2)
-    for ax in axes[len(groups):]:
-        ax.set_visible(False)
-    handles, labels = axes[0].get_legend_handles_labels() if groups else ([], [])
-    if handles:
-        fig.legend(handles, labels, loc="upper right")
-    fig.suptitle("Cadmium datapoints by layer in intelligible units", y=0.995)
-    path = PLOTS_DIR / "layer_distributions.png"
-    fig.tight_layout()
-    fig.savefig(path)
-    plt.close(fig)
-    return str(path)
-
-
-def _plot_cross_layer_points(frame: pl.DataFrame) -> str:
-    pdf = frame.to_pandas()
-    pdf = pdf[pdf["display_value"] > 0].copy()
-    if pdf.empty:
-        return str(PLOTS_DIR / "cross_layer_variability.png")
-    pdf["layer_median"] = pdf.groupby("layer")["display_value"].transform("median")
-    pdf["value_over_layer_median"] = pdf["display_value"] / pdf["layer_median"]
-    pdf["layer_percentile"] = pdf.groupby("layer")["display_value"].rank(pct=True)
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
-    rng = random.Random(11)
-    order = list(dict.fromkeys(pdf["layer"]))
-    for pos, layer in enumerate(order):
+def _plot_time_trends_interactive(frame: pl.DataFrame) -> str | None:
+    pdf = _trend_pdf(frame)
+    eligible = eligible_time_layers(pdf)
+    if not eligible:
+        return None
+    pdf = pdf[pdf["layer"].isin(eligible)].copy()
+    fig = px.scatter(
+        pdf,
+        x="year_for_plotting",
+        y="display_value",
+        color="source_id",
+        facet_row="layer",
+        facet_row_spacing=0.03,
+        category_orders={"layer": eligible},
+        hover_data={
+            "canonical_unit": True,
+            "ppm_equivalent": ':.4g',
+            "country": True,
+            "year_for_plotting_source": True,
+            "source_id": True,
+            "study_title": True,
+            "citation": True,
+            "doi": True,
+            "raw_value_text": True,
+        },
+        title="Cadmium time trends",
+        labels={"year_for_plotting": "year", "display_value": "cadmium level", "source_id": "source"},
+    )
+    fig.update_traces(marker={"size": 5, "opacity": 0.25, "color": "lightgray"})
+    for idx, layer in enumerate(eligible, start=1):
         subset = pdf[pdf["layer"] == layer]
-        jitter = [pos + rng.uniform(-0.18, 0.18) for _ in range(len(subset))]
-        axes[0].scatter(
-            subset["value_over_layer_median"],
-            jitter,
-            s=10,
-            alpha=0.18,
-            color="#1f77b4",
+        yearly = subset.groupby("year_for_plotting", as_index=False)["display_value"].median()
+        fig.add_trace(
+            go.Scatter(
+                x=yearly["year_for_plotting"],
+                y=yearly["display_value"],
+                mode="lines+markers",
+                line={"color": LAYER_COLORS.get(layer, "#333333"), "width": 2.5},
+                marker={"size": 6},
+                showlegend=False,
+                hovertemplate="%{x}: median %{y:.4g}<extra></extra>",
+            ),
+            row=idx,
+            col=1,
         )
-        axes[1].scatter(
-            subset["layer_percentile"],
-            jitter,
-            s=10,
-            alpha=0.18,
-            color="#2ca02c",
+    fig.update_yaxes(type="log")
+    fig.update_layout(height=max(500, 260 * len(eligible)), template="plotly_white")
+    return _write_html(fig, "atlas_time_trends")
+
+
+def _plot_source_coverage_interactive(frame: pl.DataFrame) -> str:
+    pdf = frame.to_pandas().sort_values("sample_count", ascending=False)
+    fig = make_subplots(
+        rows=1,
+        cols=3,
+        subplot_titles=["Top sources by samples", "Top sources by measurements", "Top sources by summary rows"],
+    )
+    fig.add_trace(go.Bar(x=pdf["source_id"], y=pdf["sample_count"], marker_color="#395c6b"), row=1, col=1)
+    fig.add_trace(go.Bar(x=pdf["source_id"], y=pdf["measurement_count"], marker_color="#467d4b"), row=1, col=2)
+    fig.add_trace(go.Bar(x=pdf["source_id"], y=pdf["summary_measurement_count"], marker_color="#9f2f43"), row=1, col=3)
+    fig.update_layout(height=500, template="plotly_white", title="Source coverage")
+    return _write_html(fig, "atlas_source_coverage")
+
+
+def _plot_country_coverage_interactive(frame: pl.DataFrame) -> str:
+    pdf = _comparison_pdf(frame)
+    coverage = pdf["country"].fillna("unknown").value_counts().head(20).sort_values(ascending=True)
+    fig = go.Figure(
+        go.Bar(
+            x=coverage.values,
+            y=coverage.index,
+            orientation="h",
+            marker_color="#1f77b4",
+            hovertemplate="%{y}: %{x} rows<extra></extra>",
         )
-    axes[0].set_xscale("log")
-    axes[0].set_yticks(range(len(order)))
-    axes[0].set_yticklabels(order)
-    axes[0].set_xlabel("value / layer median")
-    axes[0].set_title("Cross-layer comparability")
-    axes[0].grid(axis="x", alpha=0.2)
-    axes[1].set_yticks(range(len(order)))
-    axes[1].set_yticklabels(order)
-    axes[1].set_xlabel("within-layer percentile")
-    axes[1].set_title("Within-layer percentile spread")
-    axes[1].grid(axis="x", alpha=0.2)
-    path = PLOTS_DIR / "cross_layer_variability.png"
+    )
+    fig.update_layout(title="Top countries by row count", xaxis_title="row count", yaxis_title="country", template="plotly_white", height=650)
+    return _write_html(fig, "atlas_coverage_by_country")
+
+
+def _plot_year_coverage_interactive(frame: pl.DataFrame) -> str | None:
+    pdf = _trend_pdf(frame)
+    if pdf.empty:
+        return None
+    coverage = pdf.groupby(["year_for_plotting", "layer"], as_index=False).size()
+    fig = px.line(
+        coverage,
+        x="year_for_plotting",
+        y="size",
+        color="layer",
+        color_discrete_map=LAYER_COLORS,
+        title="Sample coverage by year",
+        labels={"year_for_plotting": "year", "size": "row count", "layer": "matrix layer"},
+    )
+    fig.update_layout(template="plotly_white", height=500)
+    return _write_html(fig, "atlas_coverage_by_year")
+
+
+def _plot_main_atlas_static(frame: pl.DataFrame) -> str:
+    pdf = _comparison_pdf(frame)
+    layers = ordered_layers(pdf["layer"].tolist())
+    fig, ax = plt.subplots(figsize=(11, 6.8))
+    data = [pdf.loc[pdf["layer"] == layer, "ppm_equivalent"].to_numpy() for layer in layers]
+    positions = list(range(1, len(layers) + 1))
+    vp = ax.violinplot(data, positions=positions, vert=False, showmeans=False, showmedians=False, showextrema=False)
+    for body, layer in zip(vp["bodies"], layers):
+        body.set_facecolor(LAYER_COLORS.get(layer, "#666666"))
+        body.set_edgecolor("none")
+        body.set_alpha(0.25)
+    box = ax.boxplot(
+        data,
+        positions=positions,
+        vert=False,
+        widths=0.22,
+        patch_artist=True,
+        showfliers=False,
+        medianprops={"color": "black", "linewidth": 1.6},
+        boxprops={"facecolor": "white", "edgecolor": "#222222", "linewidth": 1.0},
+        whiskerprops={"color": "#222222", "linewidth": 1.0},
+        capprops={"color": "#222222", "linewidth": 1.0},
+    )
+    counts = pdf["layer"].value_counts()
+    for pos, layer in zip(positions, layers):
+        ax.text(
+            1.01,
+            pos,
+            f"n={int(counts[layer])}",
+            transform=ax.get_yaxis_transform(),
+            va="center",
+            ha="left",
+            fontsize=9,
+            color="#333333",
+        )
+    ax.set_xscale("log")
+    ax.set_xlabel("ppm-equivalent")
+    ax.set_yticks(positions)
+    ax.set_yticklabels(layers)
+    ax.set_ylabel("")
+    ax.set_title("Cadmium concentration atlas")
+    ax.grid(axis="x", alpha=0.2)
     fig.tight_layout()
-    fig.savefig(path)
+    path = PLOTS_DIR / "atlas_main_static.pdf"
+    fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
     return str(path)
+
+
+def _plot_sparse_layers_static(frame: pl.DataFrame) -> str | None:
+    pdf = _comparison_pdf(frame)
+    pdf = pdf[pdf["layer"].isin(SPARSE_LAYERS)].copy()
+    layers = ordered_layers(pdf["layer"].tolist())
+    if not layers:
+        return None
+    fig, axes = plt.subplots(len(layers), 1, figsize=(10, max(4.5, 2.8 * len(layers))), squeeze=False)
+    for ax, layer in zip(axes.flatten(), layers):
+        subset = pdf[pdf["layer"] == layer].sort_values("ppm_equivalent")
+        y = [0.0] * len(subset)
+        jitter = [(idx % 7 - 3) * 0.03 for idx in range(len(subset))]
+        ax.scatter(subset["ppm_equivalent"], [yy + jj for yy, jj in zip(y, jitter)], s=30, color=LAYER_COLORS.get(layer, "#666666"), alpha=0.8)
+        for _, row in subset.head(12).iterrows():
+            label = row["source_id"]
+            if isinstance(row["study_title"], str) and row["study_title"]:
+                label = f"{label}: {row['study_title'][:35]}"
+            ax.annotate(label, (row["ppm_equivalent"], 0), xytext=(4, 4), textcoords="offset points", fontsize=7, color="#333333")
+        ax.set_xscale("log")
+        ax.set_yticks([])
+        ax.set_xlabel("ppm-equivalent")
+        ax.set_title(f"{layer.capitalize()} detail")
+        ax.grid(axis="x", alpha=0.2)
+    fig.tight_layout()
+    path = PLOTS_DIR / "atlas_sparse_layers_static.pdf"
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    return str(path)
+
+
+def _plot_time_trends_static(frame: pl.DataFrame) -> str | None:
+    pdf = _trend_pdf(frame)
+    layers = eligible_time_layers(pdf)
+    if not layers:
+        return None
+    fig, axes = plt.subplots(len(layers), 1, figsize=(10, max(4.5, 2.8 * len(layers))), squeeze=False)
+    for ax, layer in zip(axes.flatten(), layers):
+        subset = pdf[pdf["layer"] == layer].sort_values("year_for_plotting")
+        ax.scatter(subset["year_for_plotting"], subset["display_value"], s=10, color="lightgray", alpha=0.5, rasterized=True)
+        yearly = subset.groupby("year_for_plotting", as_index=False)["display_value"].median()
+        ax.plot(yearly["year_for_plotting"], yearly["display_value"], color=LAYER_COLORS.get(layer, "#333333"), linewidth=2.0)
+        ax.scatter(yearly["year_for_plotting"], yearly["display_value"], color=LAYER_COLORS.get(layer, "#333333"), s=18)
+        ax.set_yscale("log")
+        ax.set_title(f"{layer.capitalize()} time trend")
+        ax.set_xlabel("year")
+        ax.set_ylabel(subset["display_unit"].iloc[0] if not subset.empty else "level")
+        ax.grid(alpha=0.2)
+    fig.tight_layout()
+    path = PLOTS_DIR / "atlas_time_trends_static.pdf"
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    return str(path)
+
+
+def _plot_coverage_static(coverage_frame: pl.DataFrame, comparison_frame: pl.DataFrame, trend_frame: pl.DataFrame) -> str:
+    cov = coverage_frame.to_pandas().sort_values("sample_count", ascending=False).head(12)
+    comp = _comparison_pdf(comparison_frame)
+    countries = comp["country"].fillna("unknown").value_counts().head(12).sort_values()
+    trend_pdf = _trend_pdf(trend_frame)
+    years = trend_pdf["year_for_plotting"].value_counts().sort_index() if not trend_pdf.empty else None
+
+    fig, axes = plt.subplots(1, 3, figsize=(14, 5.5))
+    axes[0].barh(cov["source_id"][::-1], cov["sample_count"][::-1], color="#395c6b")
+    axes[0].set_title("Top sources")
+    axes[0].set_xlabel("rows")
+    axes[1].barh(countries.index, countries.values, color="#1f77b4")
+    axes[1].set_title("Top countries")
+    axes[1].set_xlabel("rows")
+    if years is not None and len(years) > 0:
+        axes[2].plot(years.index, years.values, color="#9f2f43", linewidth=2)
+        axes[2].scatter(years.index, years.values, color="#9f2f43", s=18)
+    axes[2].set_title("Coverage by year")
+    axes[2].set_xlabel("year")
+    axes[2].set_ylabel("rows")
+    for ax in axes:
+        ax.grid(axis="x", alpha=0.2)
+    fig.tight_layout()
+    path = PLOTS_DIR / "atlas_coverage_static.pdf"
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    return str(path)
+
+
+def _comparison_pdf(frame: pl.DataFrame):
+    pdf = frame.to_pandas()
+    pdf = pdf[pdf["ppm_equivalent"] > 0].copy()
+    pdf = pdf[pdf["layer"].isin(LAYER_ORDER)].copy()
+    return pdf
+
+
+def _trend_pdf(frame: pl.DataFrame):
+    pdf = frame.to_pandas()
+    pdf = pdf[(pdf["year_for_plotting"].notna()) & (pdf["display_value"] > 0)].copy()
+    if not pdf.empty:
+        pdf["year_for_plotting"] = pdf["year_for_plotting"].astype(int)
+        pdf = pdf[pdf["layer"].isin(LAYER_ORDER)].copy()
+    return pdf
+
+
+def eligible_time_layers(pdf) -> list[str]:
+    eligible: list[str] = []
+    for layer in ordered_layers(pdf["layer"].tolist() if not pdf.empty else []):
+        subset = pdf[pdf["layer"] == layer]
+        if len(subset) >= 30 and subset["year_for_plotting"].nunique() >= 5:
+            eligible.append(layer)
+    return eligible
+
+
+def ordered_layers(values: list[str]) -> list[str]:
+    present = set(values)
+    return [layer for layer in LAYER_ORDER if layer in present]
+
+
+def _write_html(fig: go.Figure, basename: str) -> str:
+    path = PLOTS_DIR / f"{basename}.html"
+    fig.write_html(path, include_plotlyjs="cdn")
+    return str(path)
+
+
+def _remove_stale_plot_outputs() -> None:
+    allowed = {f"{name}.html" for name in INTERACTIVE_BASENAMES} | {f"{name}.pdf" for name in STATIC_BASENAMES}
+    for path in PLOTS_DIR.glob("*"):
+        if path.is_file() and path.name not in allowed:
+            path.unlink()

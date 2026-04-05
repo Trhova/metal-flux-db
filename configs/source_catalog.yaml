@@ -56,8 +56,8 @@ sources:
     maturity: representative_slice
     notes: Uses latest blood cadmium-compatible public NHANES lab cycles configured in the adapter.
   - source_id: literature_search
-    source_name: Plant and gut cadmium literature search inventory
-    layer: plant_gut
+    source_name: Plant and feces cadmium literature search inventory
+    layer: plant_feces
     organization: Europe PMC / PubMed / PMC / OpenAlex / DataCite
     country_or_region: global
     access_type: api
@@ -68,7 +68,7 @@ sources:
     parser_class: LiteratureSearchAdapter
     status: implemented
     maturity: first_curated_records
-    notes: Reproducible search + metadata inventory + review queue with first live curated plant and gut rows from PMC HTML tables.
+    notes: Reproducible search + metadata inventory + review queue with direct concentration extraction prioritized for plant and feces matrices.
   - source_id: esdac_lucas_soil
     source_name: ESDAC LUCAS topsoil trace elements
     layer: soil
@@ -110,7 +110,7 @@ sources:
     parser_class: UkFsaTotalDietAdapter
     status: implemented
     maturity: summary_stats_staged
-    notes: Official Excel parsed into summary_measurements rows for cadmium exposure by food group and age class; kept separate from individual-row tables.
+    notes: Official Excel parsed into summary_measurements rows only; excluded from the concentration atlas because it is exposure-oriented summary data rather than direct concentration measurements.
   - source_id: hbm4eu_parc_cadmium
     source_name: HBM4EU and PARC cadmium biomonitoring summaries
     layer: blood
@@ -124,4 +124,4 @@ sources:
     parser_class: Hbm4euParcCadmiumAdapter
     status: implemented
     maturity: summary_stats_inventory
-    notes: Official dashboard metadata and cadmium substance page/policy brief captured; dashboard page explicitly notes that the summary-statistics file is available on request.
+    notes: Official dashboard metadata and cadmium substance page/policy brief captured; excluded from the concentration atlas because the public outputs are summary biomonitoring guidance rather than direct row-level concentration measurements.

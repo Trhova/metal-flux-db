@@ -72,7 +72,7 @@ def normalize_measurement(
         )
 
     raw_unit = raw_unit.replace("µ", "u").strip()
-    if matrix_group in {"fertilizer", "soil", "plant", "food"}:
+    if matrix_group in {"fertilizer", "soil", "plant", "food", "feces"}:
         if raw_unit == "ppm":
             canonical_value = _safe_float(raw_value)
             return NormalizationResult(
@@ -113,31 +113,6 @@ def normalize_measurement(
             canonical_unit="ug/L",
             canonical_dimension="mass_per_volume",
             conversion_rule="identity",
-            converted_from_unit=raw_unit,
-            normalized_basis=normalized_basis,
-            uncertainty_flag=False,
-        )
-
-    if matrix_group == "gut" and raw_unit in {"ug/day", "ug/kg_bw/day"}:
-        return NormalizationResult(
-            canonical_value=_safe_float(raw_value),
-            canonical_unit=raw_unit,
-            canonical_dimension="intake_mass_per_day"
-            if raw_unit == "ug/day"
-            else "intake_mass_per_mass_per_day",
-            conversion_rule="identity",
-            converted_from_unit=raw_unit,
-            normalized_basis=normalized_basis,
-            uncertainty_flag=False,
-        )
-
-    if matrix_group == "gut" and raw_unit in {"%", "percent", "fraction"}:
-        canonical_value = raw_value / 100.0 if raw_unit in {"%", "percent"} else raw_value
-        return NormalizationResult(
-            canonical_value=_safe_float(canonical_value),
-            canonical_unit="fraction",
-            canonical_dimension="fraction",
-            conversion_rule="percent_to_fraction" if raw_unit in {"%", "percent"} else "identity",
             converted_from_unit=raw_unit,
             normalized_basis=normalized_basis,
             uncertainty_flag=False,

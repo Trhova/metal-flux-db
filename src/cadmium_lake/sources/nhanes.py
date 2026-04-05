@@ -36,6 +36,9 @@ class NhanesBloodCadmiumAdapter(BaseAdapter):
             study_id=stable_id(self.source_id, "latest"),
             source_id=self.source_id,
             study_title="NHANES blood cadmium representative slice",
+            year_start=2017,
+            year_end=2021,
+            publication_year=2021,
             country="US",
             notes="Latest available public NHANES blood cadmium-compatible lab cycle configured for v1.",
         )
@@ -57,6 +60,7 @@ class NhanesBloodCadmiumAdapter(BaseAdapter):
             for row in frame.head(200).to_dict(orient="records"):
                 respondent = row.get("seqn") or stable_id(self.source_id, row)
                 sample_id = stable_id(self.source_id, respondent)
+                collection_year = infer_nhanes_year(file_path.name, row.get("sddsrvyr"))
                 payload.samples.append(
                     SampleRecord(
                         sample_id=sample_id,
@@ -68,6 +72,10 @@ class NhanesBloodCadmiumAdapter(BaseAdapter):
                         specimen_or_part="whole blood",
                         country="US",
                         collection_date=str(row.get("sddsrvyr") or ""),
+                        collection_year=collection_year,
+                        publication_year=study.publication_year,
+                        year_for_plotting=collection_year or study.publication_year,
+                        year_for_plotting_source="collection_year" if collection_year else "publication_year",
                         comments=f"Parsed from {file_path.name}",
                     )
                 )
@@ -102,3 +110,13 @@ def try_float(value) -> float | None:
         return float(value)
     except ValueError:
         return None
+
+
+def infer_nhanes_year(filename: str, survey_cycle) -> int | None:
+    for token in filename.replace(".xpt", "").split("_"):
+        if token.isdigit() and len(token) == 4:
+            return int(token)
+    text = str(survey_cycle or "").strip()
+    if text.isdigit() and len(text) == 4:
+        return int(text)
+    return None

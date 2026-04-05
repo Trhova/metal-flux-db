@@ -87,6 +87,7 @@ class WashingtonFertilizerAdapter(BaseAdapter):
             study_id=stable_id(self.source_id, "wsda", "current"),
             source_id=self.source_id,
             study_title="WSDA fertilizer product database representative slice",
+            publication_year=2026,
             notes="Parsed from official WSDA fertilizer JSON list/detail endpoints.",
         )
         payload.studies_or_batches.append(study)
@@ -110,6 +111,9 @@ class WashingtonFertilizerAdapter(BaseAdapter):
                     sample_name=sample_name,
                     specimen_or_part="product",
                     country="US",
+                    publication_year=study.publication_year,
+                    year_for_plotting=study.publication_year,
+                    year_for_plotting_source="publication_year",
                     comments=f"WSDA product #{product.get('prod_number')}",
                 )
             )

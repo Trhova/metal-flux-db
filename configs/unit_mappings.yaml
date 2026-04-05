@@ -18,13 +18,6 @@ liquid_units:
   ug/L:
     canonical_dimension: mass_per_volume
     aliases: ["ug/L", "µg/L", "mcg/L"]
-gut_units:
-  ug/day:
-    canonical_dimension: intake_mass_per_day
-    aliases: ["ug/day", "µg/day", "mcg/day"]
-  ug/kg_bw/day:
-    canonical_dimension: intake_mass_per_mass_per_day
-    aliases: ["ug/kg bw/day", "ug/kg_bw/day", "µg/kg bw/day"]
 basis_aliases:
   dry_weight: ["dry weight", "dw", "dry wt", "dry basis"]
   wet_weight: ["wet weight", "ww", "wet wt", "wet basis"]

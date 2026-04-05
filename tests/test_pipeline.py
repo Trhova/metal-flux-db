@@ -108,20 +108,6 @@ def test_literature_curated_extractors(monkeypatch):
                     ]
                 }
             }
-        if "PMCID:PMC12846066" in url or "PMCID%3APMC12846066" in url:
-            return {
-                "resultList": {
-                    "result": [
-                        {
-                            "title": "Gut cadmium paper",
-                            "doi": "10.1000/gut",
-                            "pmid": "222",
-                            "pmcid": "PMC12846066",
-                            "pubYear": "2024",
-                        }
-                    ]
-                }
-            }
         return {"resultList": {"result": []}, "esearchresult": {"idlist": []}, "result": {"uids": []}, "data": []}
 
     def fake_download_text(self, url):
@@ -144,17 +130,7 @@ def test_literature_curated_extractors(monkeypatch):
             </table>
             </body></html>
             """
-        return """
-        <html><body>
-        <table><tr><th>ignore</th></tr></table>
-        <table>
-          <tr><th>Mushroom Fruiting Bodies</th><th>Biological Accessibility of Cadmium (%)</th></tr>
-          <tr><th>Body</th><th>Accessibility</th></tr>
-          <tr><td><em>A. blazei</em></td><td>5.73 ± 0.04</td></tr>
-          <tr><td><em>L. edodes</em></td><td>N</td></tr>
-        </table>
-        </body></html>
-        """
+        return "<html><body><table><tr><th>ignore</th></tr></table></body></html>"
 
     monkeypatch.setattr(adapter_cls, "_json", fake_json)
     monkeypatch.setattr(adapter_cls, "_download_text", fake_download_text)
@@ -213,7 +189,7 @@ def test_hbm4eu_summary_extractor():
         "In blood, reference value is below 1 μg/L for adults."
     )
     rows = extract_hbm4eu_cadmium_summaries("hbm4eu_parc_cadmium", "study1", text)
-    assert len(rows) >= 3
+    assert len(rows) >= 2
     smoker = next(row for row in rows if row.subgroup == "Adults smokers")
     assert smoker.derived_flag is True
     assert smoker.lower_value == 1.0
@@ -241,7 +217,7 @@ def test_uk_fsa_parse_writes_summary_measurements():
     assert results["uk_fsa_total_diet"] >= 1
     summary = read_duckdb_table("summary_measurements").filter(pl.col("source_id") == "uk_fsa_total_diet")
     assert summary.height == 2
-    assert summary["matrix_group"].to_list() == ["gut", "gut"]
+    assert summary["matrix_group"].to_list() == ["food", "food"]
 
 
 def test_normalize_qa_and_views():

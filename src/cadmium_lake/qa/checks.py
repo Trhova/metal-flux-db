@@ -21,6 +21,7 @@ def run_qa_checks() -> dict[str, Path]:
     normalized = read_duckdb_table("measurements_normalized")
     summary = read_duckdb_table("summary_measurements")
     source_files = read_duckdb_table("source_files")
+    studies = read_duckdb_table("studies_or_batches")
 
     outputs: dict[str, Path] = {}
 
@@ -62,6 +63,67 @@ def run_qa_checks() -> dict[str, Path]:
 
     impossible = normalized.filter(pl.col("canonical_value") < 0) if not normalized.is_empty() else pl.DataFrame()
     outputs["impossible_value_report"] = _write("impossible_value_report", impossible)
+
+    invalid_conversions = (
+        raw.join(samples.select(["sample_id", "matrix_group"]), on="sample_id", how="left")
+        .join(
+            normalized.select(
+                [
+                    "measurement_id",
+                    "canonical_unit",
+                    "conversion_rule",
+                    "uncertainty_flag",
+                ]
+            ),
+            on="measurement_id",
+            how="left",
+        )
+        .filter(pl.col("uncertainty_flag") == True)
+        if not raw.is_empty() and not samples.is_empty() and not normalized.is_empty()
+        else pl.DataFrame()
+    )
+    outputs["invalid_conversion_report"] = _write("invalid_conversion_report", invalid_conversions)
+
+    missing_matrix_labels = samples.filter(pl.col("matrix_group").is_null() | (pl.col("matrix_group") == "")) if not samples.is_empty() else pl.DataFrame()
+    outputs["missing_matrix_label_report"] = _write("missing_matrix_label_report", missing_matrix_labels)
+
+    suspicious_values = (
+        normalized.join(raw.select(["measurement_id", "sample_id", "raw_value_text", "raw_unit"]), on="measurement_id", how="left")
+        .join(samples.select(["sample_id", "matrix_group"]), on="sample_id", how="left")
+        .filter(
+            (pl.col("canonical_value").is_not_null())
+            & (
+                (pl.col("canonical_value") <= 0)
+                | ((pl.col("matrix_group") != "blood") & (pl.col("canonical_value") > 1000))
+                | ((pl.col("matrix_group") == "blood") & (pl.col("canonical_value") > 50))
+            )
+        )
+        if not normalized.is_empty() and not raw.is_empty() and not samples.is_empty()
+        else pl.DataFrame()
+    )
+    outputs["suspicious_value_report"] = _write("suspicious_value_report", suspicious_values)
+
+    if not samples.is_empty():
+        sample_meta = samples.join(studies.select(["study_id", "year_start", "year_end"]), on="study_id", how="left")
+        completeness = (
+            sample_meta.with_columns(
+                [
+                    (pl.col("country").is_null() | (pl.col("country") == "")).cast(pl.Float64).alias("missing_country"),
+                    (pl.col("year_start").is_null() & pl.col("year_end").is_null()).cast(pl.Float64).alias("missing_year"),
+                ]
+            )
+            .group_by("source_id")
+            .agg(
+                [
+                    pl.len().alias("sample_count"),
+                    (pl.mean("missing_country") * 100).alias("pct_missing_country"),
+                    (pl.mean("missing_year") * 100).alias("pct_missing_year"),
+                ]
+            )
+        )
+    else:
+        completeness = pl.DataFrame()
+    outputs["metadata_completeness_report"] = _write("metadata_completeness_report", completeness)
 
     hash_report = source_files.select(["file_id", "source_id", "sha256", "local_path"]) if not source_files.is_empty() else pl.DataFrame()
     outputs["source_hash_stability_report"] = _write("source_hash_stability_report", hash_report)

@@ -44,6 +44,9 @@ class FdaTdsAdapter(BaseAdapter):
             study_id=stable_id(self.source_id, "tds", "modern"),
             source_id=self.source_id,
             study_title="FDA TDS representative slice",
+            year_start=1991,
+            year_end=2017,
+            publication_year=2017,
             country="US",
             notes="Representative modern TDS/TDSi food cadmium extract",
         )
@@ -57,6 +60,7 @@ class FdaTdsAdapter(BaseAdapter):
                 value = try_float(lowered.get("conc"))
                 mb = lowered.get("mb")
                 sample_id = stable_id(self.source_id, sample_name, mb)
+                collection_year = infer_collection_year(mb)
                 payload.samples.append(
                     SampleRecord(
                         sample_id=sample_id,
@@ -71,6 +75,10 @@ class FdaTdsAdapter(BaseAdapter):
                         as_sold_prepared_flag="as_sold",
                         country="US",
                         collection_date=str(mb),
+                        collection_year=collection_year,
+                        publication_year=study.publication_year,
+                        year_for_plotting=collection_year or study.publication_year,
+                        year_for_plotting_source="collection_year" if collection_year else "publication_year",
                         analyte_method=str(lowered.get("method")) if lowered.get("method") is not None else None,
                         lod=try_float(lowered.get("lod")),
                         loq=try_float(lowered.get("loq")),
@@ -142,3 +150,10 @@ def try_float(value) -> float | None:
         return float(str(value).replace(",", ""))
     except ValueError:
         return None
+
+
+def infer_collection_year(value) -> int | None:
+    text = str(value or "").strip()
+    if len(text) >= 4 and text[:4].isdigit():
+        return int(text[:4])
+    return None
