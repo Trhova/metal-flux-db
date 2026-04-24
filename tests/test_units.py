@@ -15,8 +15,15 @@ def test_ugkg_to_mgkg():
     assert result.conversion_rule == "ug_per_kg_to_mg_per_kg"
 
 
+def test_food_ppb_to_mgkg():
+    result = normalize_measurement(matrix_group="food", raw_value=25.0, raw_unit="ppb", raw_basis_text="as prepared")
+    assert result.canonical_value == 0.025
+    assert result.canonical_unit == "mg/kg"
+    assert result.conversion_rule == "ppb_as_ug_per_kg_to_mg_per_kg"
+
+
 def test_ug_per_g_to_mg_per_kg():
-    result = normalize_measurement(matrix_group="plant", raw_value=0.7, raw_unit="ug/g", raw_basis_text="fresh weight")
+    result = normalize_measurement(matrix_group="crop", raw_value=0.7, raw_unit="ug/g", raw_basis_text="fresh weight")
     assert result.canonical_value == 0.7
     assert result.canonical_unit == "mg/kg"
 
@@ -38,6 +45,13 @@ def test_blood_unit_identity():
     result = normalize_measurement(matrix_group="blood", raw_value=1.2, raw_unit="ug/L", raw_basis_text=None)
     assert result.canonical_value == 1.2
     assert result.canonical_unit == "ug/L"
+
+
+def test_water_unit_identity():
+    result = normalize_measurement(matrix_group="water", raw_value=0.4, raw_unit="ug/l", raw_basis_text="dissolved")
+    assert result.canonical_value == 0.4
+    assert result.canonical_unit == "ug/L"
+    assert result.canonical_dimension == "mass_per_volume"
 
 
 def test_feces_ugkg_to_mgkg():

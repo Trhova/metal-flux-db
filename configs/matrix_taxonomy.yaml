@@ -3,11 +3,13 @@ matrix_groups:
     canonical_units: ["mg/kg", "ug/kg"]
   soil:
     canonical_units: ["mg/kg", "ug/kg"]
-  plant:
+  crop:
     canonical_units: ["mg/kg", "ug/kg"]
   food:
     canonical_units: ["mg/kg", "ug/kg"]
   feces:
     canonical_units: ["mg/kg", "ug/kg"]
   blood:
+    canonical_units: ["ug/L"]
+  water:
     canonical_units: ["ug/L"]

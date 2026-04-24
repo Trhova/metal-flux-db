@@ -80,10 +80,12 @@ def parse_sources(source: str | None = None) -> dict[str, int]:
     initialize_catalog_tables()
     aggregated: dict[str, list[dict]] = defaultdict(list)
     results = {}
+    parsed_source_ids: set[str] = set()
     for source_id in selected_sources(source):
         adapter = SOURCE_REGISTRY[source_id]()
         try:
             parsed = adapter.parse()
+            parsed_source_ids.add(source_id)
             table_counts = 0
             for table_name in [
                 "source_files",
@@ -101,9 +103,27 @@ def parse_sources(source: str | None = None) -> dict[str, int]:
         except Exception as exc:
             results[source_id] = -1
             print(f"parse failed for {source_id}: {exc}")
+    existing_samples = read_duckdb_table("samples")
+    replaced_sample_ids = (
+        existing_samples.filter(pl.col("source_id").is_in(parsed_source_ids))["sample_id"].to_list()
+        if parsed_source_ids and not existing_samples.is_empty()
+        else []
+    )
     for table_name, records in aggregated.items():
         frame = records_to_frame(records)
         existing = read_duckdb_table(table_name)
+        if parsed_source_ids and not existing.is_empty() and table_name != "source_files":
+            if "source_id" in existing.columns:
+                existing = existing.filter(~pl.col("source_id").is_in(parsed_source_ids))
+            elif table_name == "measurements_raw" and replaced_sample_ids:
+                existing = existing.filter(~pl.col("sample_id").is_in(replaced_sample_ids))
+            elif table_name == "linkage_edges" and replaced_sample_ids:
+                existing = existing.filter(
+                    ~(
+                        pl.col("from_sample_id").is_in(replaced_sample_ids)
+                        | pl.col("to_sample_id").is_in(replaced_sample_ids)
+                    )
+                )
         if frame.is_empty() and not existing.is_empty():
             frame = existing
         elif not existing.is_empty() and not frame.is_empty():
@@ -128,6 +148,7 @@ def run_literature_search(layer: str | None = None) -> dict[str, int]:
     initialize_catalog_tables()
     adapter = SOURCE_REGISTRY["literature_search"]()
     if layer:
+        layer = "crop" if layer == "plant" else layer
         adapter.THEMES = {key: value for key, value in adapter.THEMES.items() if key == layer}
     parsed = adapter.parse()
     source_files = records_to_frame(record.model_dump(mode="json") for record in parsed.source_files)

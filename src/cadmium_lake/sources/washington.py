@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
@@ -13,7 +14,7 @@ from cadmium_lake.utils import stable_id
 class WashingtonFertilizerAdapter(BaseAdapter):
     source_id = "washington_fertilizer"
     LETTERS = list("ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890") + [""]
-    DETAIL_LIMIT = 10
+    DETAIL_LIMIT: int | None = None
 
     def fetch(self) -> list[SourceFileRecord]:
         base_url = self.config["source_url"]
@@ -42,11 +43,24 @@ class WashingtonFertilizerAdapter(BaseAdapter):
                 parser_version=self.parser_version,
             )
         )
-        details = []
-        selected_auto_keys = sorted(auto_keys)[: self.DETAIL_LIMIT]
-        for auto_key in selected_auto_keys:
-            details.append(self._fetch_fertilizer_detail(auto_key))
         detail_path = self.raw_dir / "fertilizer_detail.json"
+        details = self._load_existing_details(detail_path)
+        fetched_auto_keys = {detail.get("_AutoKey") for detail in details if detail.get("_AutoKey") is not None}
+        limit = self._detail_limit()
+        selected_auto_keys = sorted(auto_keys)[:limit] if limit else sorted(auto_keys)
+        detail_url = urljoin(base_url, "/LookupTypes/GetFertilizerDetail")
+        with self._client() as client:
+            for idx, auto_key in enumerate(selected_auto_keys, start=1):
+                if auto_key in fetched_auto_keys:
+                    continue
+                response = client.post(detail_url, json={"autoKey": auto_key})
+                response.raise_for_status()
+                detail = response.json()
+                detail["_AutoKey"] = auto_key
+                details.append(detail)
+                if idx % 100 == 0:
+                    detail_path.write_text(json.dumps(details, indent=2), encoding="utf-8")
+                    print(f"{self.source_id}: fetched {len(details)} product details")
         detail_path.write_text(json.dumps(details, indent=2), encoding="utf-8")
         records.append(
             SourceFileRecord(
@@ -61,6 +75,15 @@ class WashingtonFertilizerAdapter(BaseAdapter):
                 )
             )
         return records
+
+    def _detail_limit(self) -> int | None:
+        raw_limit = os.environ.get("CADMIUM_LAKE_WSDA_DETAIL_LIMIT")
+        if raw_limit is None:
+            return self.DETAIL_LIMIT
+        raw_limit = raw_limit.strip()
+        if not raw_limit:
+            return None
+        return int(raw_limit)
 
     def _fetch_fertilizer_list(self, letter: str) -> list[dict]:
         base_url = self.config["source_url"]
@@ -77,6 +100,15 @@ class WashingtonFertilizerAdapter(BaseAdapter):
             response = client.post(detail_url, json={"autoKey": auto_key})
             response.raise_for_status()
             return response.json()
+
+    def _load_existing_details(self, path) -> list[dict]:
+        if not path.exists():
+            return []
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return []
+        return data if isinstance(data, list) else []
 
     def parse(self) -> ParsedPayload:
         payload = ParsedPayload()

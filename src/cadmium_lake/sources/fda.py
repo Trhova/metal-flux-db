@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import zipfile
+from io import BytesIO
 from urllib.parse import urljoin
 
 import pandas as pd
@@ -14,11 +15,19 @@ from cadmium_lake.utils import stable_id
 
 class FdaTdsAdapter(BaseAdapter):
     source_id = "fda_tds"
+    FY2018_2020_ELEMENTS_URL = "https://www.fda.gov/media/159750/download"
 
     def fetch(self) -> list[SourceFileRecord]:
         landing_url = "https://www.fda.gov/food/fda-total-diet-study-tds/fda-total-diet-study-tds-1991-2017"
         html = self._download(landing_url)
         records = [self._write_raw_file("landing.html", landing_url, html)]
+        records.append(
+            self._write_raw_file(
+                "fy2018_2020_elements_analytical_results.txt",
+                self.FY2018_2020_ELEMENTS_URL,
+                self._download(self.FY2018_2020_ELEMENTS_URL),
+            )
+        )
         soup = BeautifulSoup(html, "lxml")
         for anchor in soup.select("a[href]"):
             href = anchor["href"]
@@ -56,11 +65,22 @@ class FdaTdsAdapter(BaseAdapter):
             rows = load_cadmium_rows(file_path)
             for row in rows:
                 lowered = {str(key).lower(): value for key, value in row.items()}
-                sample_name = str(lowered.get("food name") or lowered.get("foodname") or stable_id(self.source_id, row))
-                value = try_float(lowered.get("conc"))
-                mb = lowered.get("mb")
-                sample_id = stable_id(self.source_id, sample_name, mb)
+                sample_name = str(
+                    lowered.get("food name")
+                    or lowered.get("foodname")
+                    or lowered.get("tdsfooddescription")
+                    or stable_id(self.source_id, row)
+                )
+                value = try_float(lowered.get("conc") if "conc" in lowered else lowered.get("concentration"))
+                mb = lowered.get("mb") or lowered.get("collection")
+                fiscal_year = try_int(lowered.get("fiscalyear"))
+                calendar_year = try_int(lowered.get("calendaryear"))
+                sample_id = stable_id(self.source_id, sample_name, mb, fiscal_year, lowered.get("region"))
                 collection_year = infer_collection_year(mb)
+                if collection_year is None:
+                    collection_year = calendar_year or fiscal_year
+                page_or_sheet = file_path.name
+                raw_unit = str(lowered.get("unit") or lowered.get("units") or "mg/kg")
                 payload.samples.append(
                     SampleRecord(
                         sample_id=sample_id,
@@ -73,6 +93,7 @@ class FdaTdsAdapter(BaseAdapter):
                         edible_portion_flag=True,
                         dry_wet_basis="as sold",
                         as_sold_prepared_flag="as_sold",
+                        location_name=str(lowered.get("region")) if lowered.get("region") is not None else None,
                         country="US",
                         collection_date=str(mb),
                         collection_year=collection_year,
@@ -81,11 +102,11 @@ class FdaTdsAdapter(BaseAdapter):
                         year_for_plotting_source="collection_year" if collection_year else "publication_year",
                         analyte_method=str(lowered.get("method")) if lowered.get("method") is not None else None,
                         lod=try_float(lowered.get("lod")),
-                        loq=try_float(lowered.get("loq")),
-                        comments=f"Parsed from {file_path.name}",
+                        loq=try_float(lowered.get("loq") or lowered.get("reportinglimit")),
+                        comments=f"Parsed from {page_or_sheet}",
                     )
                 )
-                raw_text = str(lowered.get("conc"))
+                raw_text = str(lowered.get("conc") if "conc" in lowered else lowered.get("concentration"))
                 qualifier = str(lowered.get("result qualifier and remarks") or "").strip()
                 payload.measurements_raw.append(
                     RawMeasurementRecord(
@@ -94,15 +115,15 @@ class FdaTdsAdapter(BaseAdapter):
                         analyte_name="cadmium",
                         raw_value=value,
                         raw_value_text=raw_text,
-                        raw_unit=str(lowered.get("unit") or "mg/kg"),
-                        nondetect_flag=raw_text.startswith("<") or "nd" in qualifier.lower(),
+                        raw_unit=raw_unit,
+                        nondetect_flag=raw_text.startswith("<") or "nd" in qualifier.lower() or value == 0,
                         detection_qualifier=qualifier or None,
                         raw_basis_text="as sold",
-                        page_or_sheet=file_path.name,
-                        table_or_figure=str(lowered.get("mb") or "elements"),
+                        page_or_sheet=page_or_sheet,
+                        table_or_figure=str(lowered.get("mb") or lowered.get("fiscalyear") or "elements"),
                         row_label=sample_name,
-                        column_label="Conc",
-                        extraction_method="zipped_tds_text",
+                        column_label="Conc" if "conc" in lowered else "Concentration",
+                        extraction_method="zipped_tds_text" if file_path.name != "fy2018_2020_elements_analytical_results.txt" else "tds_2018_2020_tsv",
                         confidence_score=0.95,
                     )
                 )
@@ -112,7 +133,7 @@ class FdaTdsAdapter(BaseAdapter):
                         "sample_name": sample_name,
                         "mb": mb,
                         "raw_value": value,
-                        "raw_unit": str(lowered.get("unit") or "mg/kg"),
+                        "raw_unit": raw_unit,
                     }
                 )
         self._write_staging_json("parsed_rows.json", parsed_rows)
@@ -123,6 +144,11 @@ class FdaTdsAdapter(BaseAdapter):
 
 def load_cadmium_rows(path):
     rows = []
+    if path.name == "fy2018_2020_elements_analytical_results.txt":
+        frame = pd.read_csv(path, sep="\t", encoding="latin-1")
+        frame.columns = [str(column).strip() for column in frame.columns]
+        cadmium = frame[frame["Analyte"].astype(str).str.strip().str.lower() == "cadmium"]
+        return cadmium.to_dict(orient="records")
     if "151752" not in path.name and "149817" not in path.name:
         return rows
     with zipfile.ZipFile(path) as zf:
@@ -157,3 +183,12 @@ def infer_collection_year(value) -> int | None:
     if len(text) >= 4 and text[:4].isdigit():
         return int(text[:4])
     return None
+
+
+def try_int(value) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(float(str(value).replace(",", "")))
+    except ValueError:
+        return None

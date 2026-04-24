@@ -72,7 +72,7 @@ def normalize_measurement(
         )
 
     raw_unit = raw_unit.replace("µ", "u").strip()
-    if matrix_group in {"fertilizer", "soil", "plant", "food", "feces"}:
+    if matrix_group in {"fertilizer", "soil", "crop", "food", "feces"}:
         if raw_unit == "ppm":
             canonical_value = _safe_float(raw_value)
             return NormalizationResult(
@@ -84,13 +84,13 @@ def normalize_measurement(
                 normalized_basis=normalized_basis,
                 uncertainty_flag=False,
             )
-        if raw_unit in {"mg/kg", "ug/kg", "ug/g", "ng/g"}:
+        if raw_unit in {"mg/kg", "ug/kg", "ug/g", "ng/g", "ppb"}:
             if raw_unit == "mg/kg":
                 canonical_value = raw_value
                 rule = "identity"
-            elif raw_unit == "ug/kg":
+            elif raw_unit in {"ug/kg", "ppb"}:
                 canonical_value = raw_value / 1000.0
-                rule = "ug_per_kg_to_mg_per_kg"
+                rule = "ug_per_kg_to_mg_per_kg" if raw_unit == "ug/kg" else "ppb_as_ug_per_kg_to_mg_per_kg"
             elif raw_unit == "ug/g":
                 canonical_value = raw_value
                 rule = "ug_per_g_to_mg_per_kg"
@@ -107,7 +107,7 @@ def normalize_measurement(
                 uncertainty_flag=False,
             )
 
-    if matrix_group == "blood" and raw_unit in {"ug/L", "mcg/L"}:
+    if matrix_group in {"blood", "water"} and raw_unit in {"ug/L", "ug/l", "mcg/L", "mcg/l"}:
         return NormalizationResult(
             canonical_value=_safe_float(raw_value),
             canonical_unit="ug/L",

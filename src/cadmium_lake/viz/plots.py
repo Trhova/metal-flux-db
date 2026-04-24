@@ -13,12 +13,13 @@ from cadmium_lake.io import read_duckdb_table
 from cadmium_lake.paths import PLOTS_DIR
 
 
-LAYER_ORDER = ["fertilizer", "soil", "plant", "food", "feces", "blood"]
-SPARSE_LAYERS = ["fertilizer", "plant", "feces"]
+LAYER_ORDER = ["water", "fertilizer", "soil", "crop", "food", "feces", "blood"]
+SPARSE_LAYERS = ["fertilizer", "crop", "feces", "water"]
 LAYER_COLORS = {
+    "water": "#2878a6",
     "fertilizer": "#395c6b",
     "soil": "#8f5e3b",
-    "plant": "#467d4b",
+    "crop": "#467d4b",
     "food": "#c4792a",
     "feces": "#6b4f3b",
     "blood": "#9f2f43",
@@ -30,6 +31,8 @@ INTERACTIVE_BASENAMES = {
     "atlas_source_coverage",
     "atlas_coverage_by_country",
     "atlas_coverage_by_year",
+    "atlas_water_distribution",
+    "atlas_conceptual_sankey",
 }
 STATIC_BASENAMES = {
     "atlas_main_static",
@@ -47,11 +50,15 @@ def build_basic_plots() -> list[str]:
     comparison = read_duckdb_table("layer_comparison_view")
     trends = read_duckdb_table("time_trend_view")
     coverage = read_duckdb_table("source_coverage_view")
+    sankey = read_duckdb_table("sankey_layer_medians_view")
 
     if not comparison.is_empty():
         outputs.append(_plot_layer_comparison_interactive(comparison))
         outputs.append(_plot_matrix_distributions_interactive(comparison))
         outputs.append(_plot_country_coverage_interactive(comparison))
+        water_html = _plot_water_distribution_interactive(comparison)
+        if water_html:
+            outputs.append(water_html)
         outputs.append(_plot_main_atlas_static(comparison))
         sparse_path = _plot_sparse_layers_static(comparison)
         if sparse_path:
@@ -71,6 +78,11 @@ def build_basic_plots() -> list[str]:
     if not coverage.is_empty():
         outputs.append(_plot_source_coverage_interactive(coverage))
         outputs.append(_plot_coverage_static(coverage, comparison, trends))
+
+    if not sankey.is_empty():
+        sankey_html = _plot_conceptual_sankey(sankey)
+        if sankey_html:
+            outputs.append(sankey_html)
 
     return outputs
 
@@ -201,6 +213,86 @@ def _plot_source_coverage_interactive(frame: pl.DataFrame) -> str:
     return _write_html(fig, "atlas_source_coverage")
 
 
+def _plot_water_distribution_interactive(frame: pl.DataFrame) -> str | None:
+    pdf = _comparison_pdf(frame)
+    pdf = pdf[pdf["layer"] == "water"].copy()
+    if pdf.empty:
+        return None
+    fig = px.violin(
+        pdf,
+        x="matrix_subtype",
+        y="display_value",
+        color="matrix_subtype",
+        box=True,
+        points="all",
+        hover_data={
+            "display_unit": True,
+            "ppm_equivalent": ':.4g',
+            "country": True,
+            "year_for_plotting": True,
+            "source_id": True,
+            "sample_name": True,
+            "location_name": True,
+            "raw_value_text": True,
+            "raw_unit": True,
+        },
+        title="Cadmium in water by subtype",
+        labels={"display_value": "cadmium in water (ug/L)", "matrix_subtype": "water subtype"},
+    )
+    fig.update_yaxes(type="log")
+    fig.update_layout(height=600, template="plotly_white", showlegend=False)
+    return _write_html(fig, "atlas_water_distribution")
+
+
+def _plot_conceptual_sankey(frame: pl.DataFrame) -> str | None:
+    pdf = frame.to_pandas()
+    pdf = pdf[pdf["conceptual_flow_value"].notna() & (pdf["conceptual_flow_value"] > 0)].copy()
+    if pdf.empty:
+        return None
+    labels = ordered_layers(list(pdf["source_layer"]) + list(pdf["target_layer"]))
+    index = {label: idx for idx, label in enumerate(labels)}
+    values = pdf["conceptual_flow_value"].tolist()
+    fig = go.Figure(
+        data=[
+            go.Sankey(
+                arrangement="snap",
+                node={
+                    "label": labels,
+                    "color": [LAYER_COLORS.get(label, "#888888") for label in labels],
+                    "pad": 18,
+                    "thickness": 16,
+                },
+                link={
+                    "source": [index[value] for value in pdf["source_layer"]],
+                    "target": [index[value] for value in pdf["target_layer"]],
+                    "value": values,
+                    "customdata": pdf[
+                        [
+                            "source_median_ppm_equivalent",
+                            "target_median_ppm_equivalent",
+                            "source_measurement_count",
+                            "target_measurement_count",
+                        ]
+                    ].to_numpy(),
+                    "hovertemplate": (
+                        "%{source.label} -> %{target.label}<br>"
+                        "conceptual value: %{value:.4g} ppm-equivalent<br>"
+                        "source median: %{customdata[0]:.4g}<br>"
+                        "target median: %{customdata[1]:.4g}<br>"
+                        "n source/target: %{customdata[2]} / %{customdata[3]}<extra></extra>"
+                    ),
+                },
+            )
+        ]
+    )
+    fig.update_layout(
+        title="Conceptual cadmium pathway medians (not mass-balanced)",
+        template="plotly_white",
+        height=560,
+    )
+    return _write_html(fig, "atlas_conceptual_sankey")
+
+
 def _plot_country_coverage_interactive(frame: pl.DataFrame) -> str:
     pdf = _comparison_pdf(frame)
     coverage = pdf["country"].fillna("unknown").value_counts().head(20).sort_values(ascending=True)
@@ -237,46 +329,43 @@ def _plot_year_coverage_interactive(frame: pl.DataFrame) -> str | None:
 
 def _plot_main_atlas_static(frame: pl.DataFrame) -> str:
     pdf = _comparison_pdf(frame)
+    pdf = pdf[pdf["ppm_equivalent"] > 0].copy()
     layers = ordered_layers(pdf["layer"].tolist())
     fig, ax = plt.subplots(figsize=(11, 6.8))
-    data = [pdf.loc[pdf["layer"] == layer, "ppm_equivalent"].to_numpy() for layer in layers]
+    data = [pdf.loc[pdf["layer"] == layer, "log10_ppm_equivalent"].to_numpy() for layer in layers]
     positions = list(range(1, len(layers) + 1))
     vp = ax.violinplot(data, positions=positions, vert=False, showmeans=False, showmedians=False, showextrema=False)
     for body, layer in zip(vp["bodies"], layers):
         body.set_facecolor(LAYER_COLORS.get(layer, "#666666"))
         body.set_edgecolor("none")
         body.set_alpha(0.25)
-    box = ax.boxplot(
-        data,
-        positions=positions,
-        vert=False,
-        widths=0.22,
-        patch_artist=True,
-        showfliers=False,
-        medianprops={"color": "black", "linewidth": 1.6},
-        boxprops={"facecolor": "white", "edgecolor": "#222222", "linewidth": 1.0},
-        whiskerprops={"color": "#222222", "linewidth": 1.0},
-        capprops={"color": "#222222", "linewidth": 1.0},
-    )
+    means = [values.mean() for values in data]
+    ax.scatter(means, positions, marker="D", s=38, color="#111111", zorder=3, label="geometric mean")
     counts = pdf["layer"].value_counts()
     for pos, layer in zip(positions, layers):
         ax.text(
             1.01,
             pos,
-            f"n={int(counts[layer])}",
+            f"n>0={int(counts[layer])}",
             transform=ax.get_yaxis_transform(),
             va="center",
             ha="left",
             fontsize=9,
             color="#333333",
         )
-    ax.set_xscale("log")
+    all_log_values = pdf["log10_ppm_equivalent"].dropna()
+    lower = math.floor(all_log_values.min())
+    upper = math.ceil(all_log_values.max())
+    ticks = list(range(lower, upper + 1))
+    ax.set_xticks(ticks)
+    ax.set_xticklabels([f"{10 ** tick:g}" for tick in ticks])
     ax.set_xlabel("ppm-equivalent")
     ax.set_yticks(positions)
     ax.set_yticklabels(layers)
     ax.set_ylabel("")
     ax.set_title("Cadmium concentration atlas")
     ax.grid(axis="x", alpha=0.2)
+    ax.legend(frameon=False, loc="lower right")
     fig.tight_layout()
     path = PLOTS_DIR / "atlas_main_static.pdf"
     fig.savefig(path, bbox_inches="tight")

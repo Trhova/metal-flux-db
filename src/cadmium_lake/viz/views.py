@@ -12,6 +12,8 @@ DIRECT_MEASUREMENT_BASE = """
         s.sample_id,
         s.source_id,
         src.source_name,
+        src.access_type AS source_access_type,
+        src.retrieval_method AS source_retrieval_method,
         s.study_id,
         st.study_title,
         st.citation,
@@ -42,6 +44,8 @@ DIRECT_MEASUREMENT_BASE = """
         s.specimen_or_part,
         s.dry_wet_basis,
         s.location_name,
+        s.latitude,
+        s.longitude,
         r.raw_value,
         r.raw_value_text,
         r.raw_unit,
@@ -59,18 +63,18 @@ DIRECT_MEASUREMENT_BASE = """
         n.converted_from_unit,
         n.normalized_basis,
         CASE
-          WHEN s.matrix_group IN ('fertilizer', 'soil', 'plant', 'food', 'feces') AND n.canonical_unit = 'mg/kg' THEN n.canonical_value
-          WHEN s.matrix_group = 'blood' AND n.canonical_unit = 'ug/L' THEN n.canonical_value / 1000.0
+          WHEN s.matrix_group IN ('fertilizer', 'soil', 'crop', 'food', 'feces') AND n.canonical_unit = 'mg/kg' THEN n.canonical_value
+          WHEN s.matrix_group IN ('blood', 'water') AND n.canonical_unit = 'ug/L' THEN n.canonical_value / 1000.0
           ELSE NULL
         END AS ppm_equivalent,
         CASE
-          WHEN s.matrix_group IN ('fertilizer', 'soil', 'plant', 'food', 'feces') AND n.canonical_unit = 'mg/kg' THEN n.canonical_value
-          WHEN s.matrix_group = 'blood' AND n.canonical_unit = 'ug/L' THEN n.canonical_value
+          WHEN s.matrix_group IN ('fertilizer', 'soil', 'crop', 'food', 'feces') AND n.canonical_unit = 'mg/kg' THEN n.canonical_value
+          WHEN s.matrix_group IN ('blood', 'water') AND n.canonical_unit = 'ug/L' THEN n.canonical_value
           ELSE n.canonical_value
         END AS display_value,
         CASE
-          WHEN s.matrix_group IN ('fertilizer', 'soil', 'plant', 'food', 'feces') AND n.canonical_unit = 'mg/kg' THEN 'ppm'
-          WHEN s.matrix_group = 'blood' AND n.canonical_unit = 'ug/L' THEN 'ug/L'
+          WHEN s.matrix_group IN ('fertilizer', 'soil', 'crop', 'food', 'feces') AND n.canonical_unit = 'mg/kg' THEN 'ppm'
+          WHEN s.matrix_group IN ('blood', 'water') AND n.canonical_unit = 'ug/L' THEN 'ug/L'
           ELSE n.canonical_unit
         END AS display_unit
       FROM measurements_normalized n
@@ -84,6 +88,55 @@ DIRECT_MEASUREMENT_BASE = """
 
 
 VIEW_SQL = {
+    "measurement_master_view": f"""
+        CREATE OR REPLACE VIEW measurement_master_view AS
+        {DIRECT_MEASUREMENT_BASE}
+        SELECT
+          measurement_id,
+          sample_id,
+          source_id,
+          source_name,
+          source_access_type,
+          source_retrieval_method,
+          study_id,
+          study_title,
+          citation,
+          doi,
+          collection_year,
+          publication_year,
+          year_for_plotting,
+          year_for_plotting_source,
+          country,
+          layer AS matrix_group,
+          matrix_subtype,
+          sample_name,
+          specimen_or_part,
+          dry_wet_basis,
+          location_name,
+          latitude,
+          longitude,
+          raw_value,
+          raw_value_text,
+          raw_unit,
+          raw_basis_text,
+          page_or_sheet,
+          table_or_figure,
+          row_label,
+          column_label,
+          extraction_method,
+          confidence_score,
+          canonical_value,
+          canonical_unit,
+          canonical_dimension,
+          conversion_rule,
+          converted_from_unit,
+          normalized_basis,
+          ppm_equivalent,
+          display_value,
+          display_unit
+        FROM direct_measurements
+        ORDER BY source_id, sample_id, measurement_id
+    """,
     "layer_comparison_view": f"""
         CREATE OR REPLACE VIEW layer_comparison_view AS
         {DIRECT_MEASUREMENT_BASE}
@@ -92,6 +145,8 @@ VIEW_SQL = {
           sample_id,
           source_id,
           source_name,
+          source_access_type,
+          source_retrieval_method,
           study_id,
           study_title,
           citation,
@@ -107,6 +162,8 @@ VIEW_SQL = {
           specimen_or_part,
           dry_wet_basis,
           location_name,
+          latitude,
+          longitude,
           raw_value,
           raw_value_text,
           raw_unit,
@@ -144,6 +201,8 @@ VIEW_SQL = {
           sample_id,
           source_id,
           source_name,
+          source_access_type,
+          source_retrieval_method,
           study_id,
           study_title,
           citation,
@@ -155,6 +214,10 @@ VIEW_SQL = {
           country,
           layer,
           matrix_subtype,
+          sample_name,
+          location_name,
+          latitude,
+          longitude,
           canonical_unit,
           display_value,
           display_unit,
@@ -201,21 +264,21 @@ VIEW_SQL = {
           GROUP BY 1
         ) yrs USING (source_id)
     """,
-    "soil_plant_pairs_view": """
-        CREATE OR REPLACE VIEW soil_plant_pairs_view AS
-        SELECT e.edge_id, e.relationship_type, s1.sample_id AS soil_sample_id, s2.sample_id AS plant_sample_id
+    "soil_crop_pairs_view": """
+        CREATE OR REPLACE VIEW soil_crop_pairs_view AS
+        SELECT e.edge_id, e.relationship_type, s1.sample_id AS soil_sample_id, s2.sample_id AS crop_sample_id
         FROM linkage_edges e
         JOIN samples s1 ON e.from_sample_id = s1.sample_id
         JOIN samples s2 ON e.to_sample_id = s2.sample_id
-        WHERE s1.matrix_group = 'soil' AND s2.matrix_group = 'plant'
+        WHERE s1.matrix_group = 'soil' AND s2.matrix_group = 'crop'
     """,
-    "plant_food_pairs_view": """
-        CREATE OR REPLACE VIEW plant_food_pairs_view AS
-        SELECT e.edge_id, e.relationship_type, s1.sample_id AS plant_sample_id, s2.sample_id AS food_sample_id
+    "crop_food_pairs_view": """
+        CREATE OR REPLACE VIEW crop_food_pairs_view AS
+        SELECT e.edge_id, e.relationship_type, s1.sample_id AS crop_sample_id, s2.sample_id AS food_sample_id
         FROM linkage_edges e
         JOIN samples s1 ON e.from_sample_id = s1.sample_id
         JOIN samples s2 ON e.to_sample_id = s2.sample_id
-        WHERE s1.matrix_group = 'plant' AND s2.matrix_group = 'food'
+        WHERE s1.matrix_group = 'crop' AND s2.matrix_group = 'food'
     """,
     "food_feces_view": """
         CREATE OR REPLACE VIEW food_feces_view AS
@@ -232,6 +295,38 @@ VIEW_SQL = {
         JOIN samples s1 ON e.from_sample_id = s1.sample_id
         JOIN samples s2 ON e.to_sample_id = s2.sample_id
         WHERE s1.matrix_group = 'feces' AND s2.matrix_group = 'blood'
+    """,
+    "sankey_layer_medians_view": """
+        CREATE OR REPLACE VIEW sankey_layer_medians_view AS
+        WITH medians AS (
+          SELECT layer, median(ppm_equivalent) AS median_ppm_equivalent, COUNT(*) AS measurement_count
+          FROM layer_comparison_view
+          GROUP BY 1
+        ),
+        flow_map(source_layer, target_layer) AS (
+          VALUES
+            ('water', 'soil'),
+            ('fertilizer', 'soil'),
+            ('soil', 'crop'),
+            ('crop', 'food'),
+            ('food', 'feces'),
+            ('food', 'blood')
+        )
+        SELECT
+          source_layer,
+          target_layer,
+          src.median_ppm_equivalent AS source_median_ppm_equivalent,
+          dst.median_ppm_equivalent AS target_median_ppm_equivalent,
+          CASE
+            WHEN src.median_ppm_equivalent IS NOT NULL AND dst.median_ppm_equivalent IS NOT NULL
+              THEN sqrt(src.median_ppm_equivalent * dst.median_ppm_equivalent)
+            ELSE COALESCE(src.median_ppm_equivalent, dst.median_ppm_equivalent)
+          END AS conceptual_flow_value,
+          src.measurement_count AS source_measurement_count,
+          dst.measurement_count AS target_measurement_count
+        FROM flow_map
+        LEFT JOIN medians src ON flow_map.source_layer = src.layer
+        LEFT JOIN medians dst ON flow_map.target_layer = dst.layer
     """,
     "chain_summary_view": """
         CREATE OR REPLACE VIEW chain_summary_view AS

@@ -28,14 +28,25 @@ Moisture conversions are allowed only when moisture metadata is present and trac
 
 ## Matrix endpoints
 
-- `fertilizer`, `soil`, `plant`, `food`, and `feces` normalize to canonical `mg/kg`
-- `blood` normalizes to canonical `ug/L`
+- `fertilizer`, `soil`, `crop`, `food`, and `feces` normalize to canonical `mg/kg`
+- `blood` and `water` normalize to canonical `ug/L`
 
-For cross-layer comparison plots, solid matrices use `ppm` as the display unit and blood uses an approximate `ppm-equivalent` of `ug/L / 1000`.
+For cross-layer comparison plots, solid matrices use `ppm` as the display unit and liquid matrices (`blood`, `water`) use an approximate `ppm-equivalent` of `ug/L / 1000`.
 
 ## Blood layer
 
 Canonical blood endpoint is `ug/L`, with specimen subtype preserved separately.
+
+## Water layer
+
+Canonical water endpoint is `ug/L`, with water subtype preserved as `matrix_subtype`:
+
+- `groundwater`
+- `surface_water`
+- `drinking_water`
+- `irrigation_water`
+
+Water is not mixed into the solid `mg/kg` tables. It is only converted to `ppm-equivalent` for cross-layer visualization by dividing `ug/L` by 1000.
 
 ## Nondetects
 

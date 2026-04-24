@@ -11,8 +11,8 @@ sources:
     priority: tier_1
     parser_class: WashingtonFertilizerAdapter
     status: implemented
-    maturity: representative_slice
-    notes: Product and metal tables fetched from official WSDA fertilizer database pages.
+    maturity: expanded_product_ingestion
+    notes: Product list and cadmium detail rows fetched from official WSDA fertilizer database pages. Detail fetch supports checkpointing and can be resumed or capped with CADMIUM_LAKE_WSDA_DETAIL_LIMIT.
   - source_id: usgs_soil
     source_name: USGS soil geochemical cadmium release
     layer: soil
@@ -41,6 +41,20 @@ sources:
     status: implemented
     maturity: representative_slice
     notes: Uses a documented modern TDS/TDSi downloadable table window for food cadmium rows.
+  - source_id: health_canada_tds_trace_elements
+    source_name: Canadian Total Diet Study trace elements
+    layer: food
+    organization: Health Canada
+    country_or_region: Canada
+    access_type: csv
+    source_url: https://open.canada.ca/data/en/dataset/83934503-cfae-4773-b258-e336896c2c53
+    license_or_terms: Open Government Licence - Canada; review dataset terms and attribution requirements.
+    retrieval_method: direct_file_download
+    priority: tier_1
+    parser_class: HealthCanadaTdsTraceElementsAdapter
+    status: implemented
+    maturity: direct_composite_food_rows
+    notes: Official Canadian Total Diet Study trace-elements CSV from 1993-2018. Parser imports direct cadmium concentration rows for food composites with sample code, collection date/location, LOD/operator, method, and project provenance.
   - source_id: nhanes_blood_cadmium
     source_name: CDC NHANES blood cadmium biomonitoring
     layer: blood
@@ -53,11 +67,11 @@ sources:
     priority: tier_1
     parser_class: NhanesBloodCadmiumAdapter
     status: implemented
-    maturity: representative_slice
-    notes: Uses latest blood cadmium-compatible public NHANES lab cycles configured in the adapter.
+    maturity: expanded_public_cycles
+    notes: Uses public NHANES whole-blood cadmium lab files from 1999-2023, preserving each participant/sample row and cycle file provenance.
   - source_id: literature_search
-    source_name: Plant and feces cadmium literature search inventory
-    layer: plant_feces
+    source_name: Crop, feces, and water cadmium literature search inventory
+    layer: crop_feces_water
     organization: Europe PMC / PubMed / PMC / OpenAlex / DataCite
     country_or_region: global
     access_type: api
@@ -68,7 +82,35 @@ sources:
     parser_class: LiteratureSearchAdapter
     status: implemented
     maturity: first_curated_records
-    notes: Reproducible search + metadata inventory + review queue with direct concentration extraction prioritized for plant and feces matrices.
+    notes: Reproducible search + metadata inventory + review queue with direct concentration extraction prioritized for human-relevant crop, feces, and water matrices.
+  - source_id: feces_literature
+    source_name: Curated feces cadmium literature extraction
+    layer: feces
+    organization: Peer-reviewed literature
+    country_or_region: global
+    access_type: literature
+    source_url: https://pubmed.ncbi.nlm.nih.gov/?term=feces+cadmium+concentration
+    license_or_terms: Paper-specific copyright and repository terms apply; extracted facts are limited to direct concentration values and provenance.
+    retrieval_method: curated_pdf_and_article_extraction
+    priority: tier_1
+    parser_class: CuratedFecesLiteratureAdapter
+    status: implemented
+    maturity: curated_summary_table_rows
+    notes: Literature-only source, not an API/database source. Imports only feces/stool cadmium concentrations with concentration units; per-day excretion outputs are excluded unless convertible with traceable fecal mass metadata.
+  - source_id: usgs_wqp_water
+    source_name: Water Quality Portal cadmium water measurements
+    layer: water
+    organization: United States Geological Survey / U.S. Environmental Protection Agency / National Water Quality Monitoring Council
+    country_or_region: US
+    access_type: api
+    source_url: https://www.waterqualitydata.us/
+    license_or_terms: Public water-quality data; source organizations retain their own terms and QA status.
+    retrieval_method: wqp_result_physchem_csv
+    priority: tier_1
+    parser_class: UsgsWqpWaterAdapter
+    status: implemented
+    maturity: expanded_query_window_ingestion
+    notes: Direct cadmium water concentrations from WQP result physical/chemical CSV profiles. Default query windows are bounded state/decade pulls for filtered cadmium to avoid unbounded WQP timeouts while still importing thousands of traceable rows.
   - source_id: esdac_lucas_soil
     source_name: ESDAC LUCAS topsoil trace elements
     layer: soil
@@ -97,6 +139,34 @@ sources:
     status: implemented
     maturity: official_inventory_portal
     notes: Official GEMAS inventory captured; public ArcGIS REST exposes GEMAS parameter/supporting layers, but no public single-element cadmium service was found in the published geochemistry service catalog.
+  - source_id: foregs_geochemical_atlas_soil
+    source_name: FOREGS-EuroGeoSurveys Geochemical Atlas of Europe soil cadmium
+    layer: soil
+    organization: EuroGeoSurveys / Geological Survey of Finland
+    country_or_region: Europe
+    access_type: dataset
+    source_url: http://weppi.gtk.fi/publ/foregsatlas/ForegsData.php
+    license_or_terms: Cite Salminen R. (ed.) 2005 and mark data as Geochemical Atlas of Europe; copyright EuroGeoSurveys/GTK.
+    retrieval_method: official_zip_csv
+    priority: tier_1
+    parser_class: ForegsGeochemicalAtlasSoilAdapter
+    status: implemented
+    maturity: direct_soil_sample_rows
+    notes: Official raw analytical topsoil and subsoil ZIP files. Parser imports direct Cd mg/kg rows from CD_MS in the ICP-MS additional-elements CSV files with GTN sample IDs, coordinates, and country codes.
+  - source_id: gsi_dublin_soil
+    source_name: Geological Survey Ireland Dublin SURGE urban topsoil cadmium
+    layer: soil
+    organization: Geological Survey Ireland
+    country_or_region: Ireland
+    access_type: arcgis_rest
+    source_url: https://gsi.geodata.gov.ie/server/rest/services/Geochemistry/IE_GSI_Soil_Urban_Geochemistry_SURGE_Dublin_IE26_ITM/MapServer/7
+    license_or_terms: Review Geological Survey Ireland service terms and attribution requirements.
+    retrieval_method: arcgis_feature_query
+    priority: tier_2
+    parser_class: GsiDublinSoilAdapter
+    status: implemented
+    maturity: direct_feature_layer_rows
+    notes: Official ArcGIS feature layer for Dublin SURGE urban topsoil cadmium, exposing sample IDs and Cd mg/kg values as queryable features.
   - source_id: uk_fsa_total_diet
     source_name: UK Food Standards Agency Total Diet Study
     layer: food
@@ -125,3 +195,73 @@ sources:
     status: implemented
     maturity: summary_stats_inventory
     notes: Official dashboard metadata and cadmium substance page/policy brief captured; excluded from the concentration atlas because the public outputs are summary biomonitoring guidance rather than direct row-level concentration measurements.
+  - source_id: eea_waterbase_water
+    source_name: EEA Waterbase Water Quality ICM
+    layer: water
+    organization: European Environment Agency
+    country_or_region: Europe
+    access_type: dataset
+    source_url: https://www.eea.europa.eu/data-and-maps/data/waterbase-water-quality-icm-2
+    license_or_terms: EEA data policy; cite European Environment Agency and original Waterbase/WISE SoE source.
+    retrieval_method: discodata_sql
+    priority: tier_1
+    parser_class: EeaWaterbaseWaterAdapter
+    status: implemented
+    maturity: direct_water_sample_rows
+    notes: Direct disaggregated cadmium water sample rows queried from EEA Discodata WISE_SOE.latest.Waterbase_T_WISE6_DisaggregatedData using CAS_7440-43-9 and water matrices W/W-DIS.
+  - source_id: who_gems_food
+    source_name: WHO GEMS/Food FOSCOLLAB chemical occurrence data
+    layer: food
+    organization: World Health Organization
+    country_or_region: global
+    access_type: dashboard
+    source_url: https://apps.who.int/foscollab/
+    license_or_terms: Review WHO FOSCOLLAB terms and attribution requirements.
+    retrieval_method: official_dashboard_inventory
+    priority: tier_1
+    parser_class:
+    status: candidate
+    maturity: source_identified
+    notes: Candidate global food cadmium occurrence source; include only direct concentration rows, not modeled exposure outputs.
+  - source_id: efsa_chemical_occurrence
+    source_name: EFSA chemical contaminants occurrence data
+    layer: food
+    organization: European Food Safety Authority
+    country_or_region: EU
+    access_type: data_portal
+    source_url: https://www.efsa.europa.eu/en/data/data-reports
+    license_or_terms: Review EFSA data portal terms and data-use requirements.
+    retrieval_method: official_portal_inventory
+    priority: tier_1
+    parser_class:
+    status: candidate
+    maturity: source_identified
+    notes: Candidate food/feed contaminant occurrence data source for cadmium concentration rows.
+  - source_id: efsa_seaweed_occurrence
+    source_name: EFSA seaweed and halophyte heavy-metal food occurrence data
+    layer: food
+    organization: European Food Safety Authority
+    country_or_region: EU
+    access_type: dataset
+    source_url: https://zenodo.org/records/7576613
+    license_or_terms: Creative Commons Attribution 4.0 International on Zenodo record.
+    retrieval_method: zenodo_official_dataset
+    priority: tier_1
+    parser_class: EfsaSeaweedOccurrenceAdapter
+    status: implemented
+    maturity: direct_food_sample_rows
+    notes: Official EFSA Knowledge Junction/Zenodo raw occurrence workbook. Parser imports food rows for cadmium parameter RF-00000150-CHE and excludes rows explicitly marked EXCLUSION.
+  - source_id: chms_blood_cadmium
+    source_name: Canadian Health Measures Survey cadmium biomonitoring
+    layer: blood
+    organization: Statistics Canada / Health Canada
+    country_or_region: Canada
+    access_type: survey_microdata_or_summary
+    source_url: https://www.statcan.gc.ca/en/survey/household/5071
+    license_or_terms: Review Statistics Canada access controls; row-level health microdata may require controlled access.
+    retrieval_method: official_survey_inventory
+    priority: tier_2
+    parser_class:
+    status: candidate
+    maturity: source_identified
+    notes: Candidate blood/urine cadmium biomonitoring source; direct individual concentration rows may be access-controlled.

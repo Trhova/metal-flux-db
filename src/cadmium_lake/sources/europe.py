@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import json
 import re
+import zipfile
 from urllib.parse import urljoin
 
 import httpx
 import pandas as pd
 from bs4 import BeautifulSoup
 
-from cadmium_lake.models import ReviewQueueRecord, SourceFileRecord, StudyRecord, SummaryMeasurementRecord
+from cadmium_lake.models import (
+    RawMeasurementRecord,
+    ReviewQueueRecord,
+    SampleRecord,
+    SourceFileRecord,
+    StudyRecord,
+    SummaryMeasurementRecord,
+)
 from cadmium_lake.sources.base import BaseAdapter, ParsedPayload
 from cadmium_lake.utils import stable_id
 
@@ -150,6 +158,143 @@ class GemasSoilAdapter(BaseAdapter):
                 }
             ],
         )
+        return payload
+
+
+class ForegsGeochemicalAtlasSoilAdapter(BaseAdapter):
+    source_id = "foregs_geochemical_atlas_soil"
+
+    LANDING_URL = "http://weppi.gtk.fi/publ/foregsatlas/ForegsData.php"
+    TOPSOIL_URL = "http://weppi.gtk.fi/publ/foregsatlas/Topsoil.zip"
+    SUBSOIL_URL = "http://weppi.gtk.fi/publ/foregsatlas/Subsoil.zip"
+    FILES = [
+        {
+            "zip_name": "Topsoil.zip",
+            "url": TOPSOIL_URL,
+            "member": "Topsoil/T_icpadd_data_2v3_8Feb06.csv",
+            "matrix_subtype": "topsoil",
+            "sample_suffix": "T",
+        },
+        {
+            "zip_name": "Subsoil.zip",
+            "url": SUBSOIL_URL,
+            "member": "Subsoil/C_icpadd_data_2v5_9Feb06.csv",
+            "matrix_subtype": "subsoil",
+            "sample_suffix": "C",
+        },
+    ]
+
+    def fetch(self) -> list[SourceFileRecord]:
+        records = [self._write_raw_file("ForegsData.html", self.LANDING_URL, self._download(self.LANDING_URL))]
+        for item in self.FILES:
+            records.append(self._write_raw_file(item["zip_name"], item["url"], self._download(item["url"])))
+        return records
+
+    def parse(self) -> ParsedPayload:
+        payload = ParsedPayload()
+        studies = StudyRecord(
+            study_id=stable_id(self.source_id, "foregs-geochemical-atlas-soil-cadmium"),
+            source_id=self.source_id,
+            study_title="FOREGS-EuroGeoSurveys Geochemical Atlas of Europe topsoil and subsoil cadmium",
+            year_start=1998,
+            year_end=2005,
+            publication_year=2005,
+            country="Europe",
+            citation="Salminen R. (ed.) 2005. Geochemical Atlas of Europe. Part 1. Geological Survey of Finland / EuroGeoSurveys.",
+            notes=(
+                "Official GTK/EuroGeoSurveys FOREGS raw analytical data. Parser imports CD_MS from topsoil "
+                "and subsoil ICP-MS additional-elements CSV files. Source documentation states values below "
+                "detection limit were converted to half the detection-limit value in the published files."
+            ),
+        )
+        payload.studies_or_batches.append(studies)
+
+        parsed_rows = []
+        for item in self.FILES:
+            zip_path = self.raw_dir / item["zip_name"]
+            if not zip_path.exists():
+                continue
+            payload.source_files.append(
+                SourceFileRecord(
+                    file_id=stable_id(self.source_id, item["url"], zip_path.name),
+                    source_id=self.source_id,
+                    original_url=item["url"],
+                    local_path=str(zip_path),
+                    mime_type="application/zip",
+                    sha256=self._write_and_hash_existing(zip_path),
+                    retrieved_at=self._timestamp(),
+                    parser_version=self.parser_version,
+                )
+            )
+            frame, unit, detection_limit = load_foregs_cadmium_csv(zip_path, item["member"])
+            for row in frame.to_dict(orient="records"):
+                gtn = clean_text(row.get("GTN"))
+                if not gtn:
+                    continue
+                raw_value = try_float(row.get("CD_MS"))
+                if raw_value is None or raw_value < 0:
+                    continue
+                country = clean_text(row.get("COUNTRY")) or clean_text(row.get("CNTRY")) or clean_text(row.get("COUNTR"))
+                sample_id = stable_id(self.source_id, gtn, item["matrix_subtype"])
+                payload.samples.append(
+                    SampleRecord(
+                        sample_id=sample_id,
+                        source_id=self.source_id,
+                        study_id=studies.study_id,
+                        matrix_group="soil",
+                        matrix_subtype=item["matrix_subtype"],
+                        sample_name=gtn,
+                        specimen_or_part=item["matrix_subtype"],
+                        location_name=gtn,
+                        latitude=try_float(row.get("LAT")),
+                        longitude=try_float(row.get("LONG")),
+                        country=country or None,
+                        publication_year=2005,
+                        year_for_plotting=2005,
+                        year_for_plotting_source="publication_year",
+                        analyte_method="ICP-MS additional-elements file",
+                        lod=detection_limit,
+                        comments=(
+                            "FOREGS GTN sample identifier; coordinates transformed to continental-scale "
+                            "geographical coordinates by source. Published values below detection limit were "
+                            "converted by source to DL/2, so exact censored rows cannot be recovered from the "
+                            "public file."
+                        ),
+                    )
+                )
+                payload.measurements_raw.append(
+                    RawMeasurementRecord(
+                        measurement_id=stable_id(self.source_id, gtn, item["matrix_subtype"], "CD_MS"),
+                        sample_id=sample_id,
+                        analyte_name="cadmium",
+                        raw_value=raw_value,
+                        raw_value_text=clean_text(row.get("CD_MS")),
+                        raw_unit=unit,
+                        nondetect_flag=False,
+                        detection_qualifier="source_below_dl_values_are_dl_over_2",
+                        raw_basis_text="published_foregs_solid_soil",
+                        page_or_sheet=item["member"],
+                        table_or_figure="CD_MS",
+                        row_label=gtn,
+                        column_label="CD_MS",
+                        extraction_method="foregs_raw_csv",
+                        confidence_score=0.96,
+                    )
+                )
+                parsed_rows.append(
+                    {
+                        "sample_id": sample_id,
+                        "gtn": gtn,
+                        "matrix_subtype": item["matrix_subtype"],
+                        "country": country,
+                        "raw_value": raw_value,
+                        "raw_unit": unit,
+                    }
+                )
+
+        self._write_staging_json("parsed_rows.json", parsed_rows)
+        payload.samples = list({sample.sample_id: sample for sample in payload.samples}.values())
+        payload.measurements_raw = list({measurement.measurement_id: measurement for measurement in payload.measurements_raw}.values())
         return payload
 
 
@@ -477,3 +622,183 @@ def inspect_gemas_public_services(services: list[str]) -> dict[str, list[str]]:
         data = httpx.get(url, headers={"User-Agent": "cadmium-lake/0.1.0"}, timeout=60).json()
         details[service_name] = [str(layer.get("name")) for layer in data.get("layers", [])[:50]]
     return details
+
+
+def load_foregs_cadmium_csv(zip_path, member: str) -> tuple[pd.DataFrame, str, float | None]:
+    with zipfile.ZipFile(zip_path) as archive:
+        with archive.open(member) as handle:
+            frame = pd.read_csv(handle, encoding="latin-1", dtype=str)
+    unit_row = frame[frame["GTN"].astype(str).str.lower() == "unit"]
+    dl_row = frame[frame["GTN"].astype(str).str.upper() == "DL"]
+    unit = clean_text(unit_row["CD_MS"].iloc[0]) if not unit_row.empty else "mg/kg"
+    detection_limit = try_float(dl_row["CD_MS"].iloc[0]) if not dl_row.empty else None
+    data = frame[~frame["GTN"].astype(str).isin(["unit", "DL"])].copy()
+    return data, unit, detection_limit
+
+
+class EfsaSeaweedOccurrenceAdapter(BaseAdapter):
+    source_id = "efsa_seaweed_occurrence"
+
+    RECORD_API_URL = "https://zenodo.org/api/records/7576613"
+    RAW_OCCURRENCE_URL = "https://zenodo.org/api/records/7576613/files/Annex_C_Raw_Ocurrence_data.xls/content"
+    CADMIUM_PARAM_CODE = "RF-00000150-CHE"
+
+    def fetch(self) -> list[SourceFileRecord]:
+        return [
+            self._write_raw_file("zenodo_record.json", self.RECORD_API_URL, self._download(self.RECORD_API_URL)),
+            self._write_raw_file(
+                "Annex_C_Raw_Ocurrence_data.xls",
+                self.RAW_OCCURRENCE_URL,
+                self._download(self.RAW_OCCURRENCE_URL),
+            ),
+        ]
+
+    def parse(self) -> ParsedPayload:
+        payload = ParsedPayload()
+        xls_path = self.raw_dir / "Annex_C_Raw_Ocurrence_data.xls"
+        if not xls_path.exists():
+            return payload
+
+        study = StudyRecord(
+            study_id=stable_id(self.source_id, "efsa-seaweed-halophyte-occurrence"),
+            source_id=self.source_id,
+            study_title="EFSA seaweed and halophyte heavy-metal food occurrence data",
+            year_start=2011,
+            year_end=2021,
+            country="EU",
+            citation="EFSA Knowledge Junction / Zenodo record 7576613",
+            repository_doi="10.5281/zenodo.7576613",
+            notes=(
+                "Official EFSA raw occurrence dataset for food and feed samples; parser imports only food rows "
+                "with cadmium parameter code RF-00000150-CHE and excludes rows marked EXCLUSION."
+            ),
+        )
+        payload.studies_or_batches.append(study)
+
+        frame = pd.read_excel(xls_path, sheet_name="Raw Food occurrence data")
+        cadmium = frame[frame["paramCode.base.param"].astype(str) == self.CADMIUM_PARAM_CODE].copy()
+        outcome = cadmium["outcome"].astype(str)
+        cadmium = cadmium[~outcome.str.contains("EXCLUSION|Exclusion", na=False)]
+        parsed_rows = []
+        for row in cadmium.to_dict(orient="records"):
+            res_id = clean_text(row.get("resId_A")) or stable_id(self.source_id, row)
+            sample_key = clean_text(row.get("sampId_A")) or clean_text(row.get("sampEventId_A")) or res_id
+            sample_id = stable_id(self.source_id, sample_key, clean_text(row.get("sampAnId_A")))
+            sample_year = try_int(row.get("sampY")) or try_int(row.get("analysisY"))
+            sample_date = build_partial_date(row.get("sampY"), row.get("sampD"))
+            food_description = clean_text(row.get("sampMatCode_desc")) or clean_text(row.get("anMatCode_desc"))
+            food_name = food_description.split("#", 1)[0] if food_description else clean_text(row.get("sampMatCode_last"))
+            raw_value = try_float(row.get("resVal"))
+            res_type = clean_text(row.get("resType"))
+            raw_unit = normalize_efsa_unit(clean_text(row.get("resUnit")))
+            lod = try_float(row.get("resLOD"))
+            loq = try_float(row.get("resLOQ"))
+            payload.samples.append(
+                SampleRecord(
+                    sample_id=sample_id,
+                    source_id=self.source_id,
+                    study_id=study.study_id,
+                    matrix_group="food",
+                    matrix_subtype="seaweed_halophyte_food",
+                    sample_name=food_name or sample_key,
+                    specimen_or_part=food_name or "food",
+                    edible_portion_flag=True,
+                    dry_wet_basis=clean_text(row.get("exprResType")) or None,
+                    location_name=clean_text(row.get("sampPoint")) or None,
+                    country=clean_text(row.get("sampCountry")) or None,
+                    collection_date=sample_date,
+                    collection_year=sample_year,
+                    year_for_plotting=sample_year,
+                    year_for_plotting_source="sampY" if sample_year else None,
+                    analyte_method=clean_text(row.get("anMethCode.base.meth")) or None,
+                    lod=lod,
+                    loq=loq,
+                    comments=(
+                        f"sample_material={food_description}; analysis_year={clean_text(row.get('analysisY'))}; "
+                        f"origin_country={clean_text(row.get('origCountry'))}; "
+                        f"process_country={clean_text(row.get('procCountry'))}; "
+                        f"lab_country={clean_text(row.get('labCountry'))}; "
+                        f"outcome={clean_text(row.get('outcome'))}; issue={clean_text(row.get('issue'))}"
+                    ),
+                )
+            )
+            payload.measurements_raw.append(
+                RawMeasurementRecord(
+                    measurement_id=stable_id(self.source_id, res_id),
+                    sample_id=sample_id,
+                    analyte_name="cadmium",
+                    raw_value=raw_value,
+                    raw_value_text=clean_text(row.get("resVal"))
+                    or clean_text(row.get("resLOQ"))
+                    or clean_text(row.get("resLOD"))
+                    or "",
+                    raw_unit=raw_unit,
+                    nondetect_flag=res_type in {"LOD", "LOQ"} and raw_value is None,
+                    detection_qualifier=res_type or None,
+                    raw_basis_text=clean_text(row.get("exprResType")) or None,
+                    page_or_sheet="Raw Food occurrence data",
+                    table_or_figure="Annex_C_Raw_Ocurrence_data.xls",
+                    row_label=res_id,
+                    column_label="resVal",
+                    extraction_method="efsa_raw_occurrence_xls",
+                    confidence_score=0.95,
+                )
+            )
+            parsed_rows.append(
+                {
+                    "measurement_id": stable_id(self.source_id, res_id),
+                    "sample_id": sample_id,
+                    "country": clean_text(row.get("sampCountry")),
+                    "food_name": food_name,
+                    "raw_value": raw_value,
+                    "raw_unit": raw_unit,
+                    "res_type": res_type,
+                }
+            )
+
+        self._write_staging_json("parsed_rows.json", parsed_rows)
+        payload.samples = list({sample.sample_id: sample for sample in payload.samples}.values())
+        payload.measurements_raw = list({item.measurement_id: item for item in payload.measurements_raw}.values())
+        return payload
+
+
+def normalize_efsa_unit(value: str) -> str | None:
+    if value == "G050A":
+        return "ug/kg"
+    return value or None
+
+
+def clean_text(value) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    text = str(value).strip()
+    return "" if text.lower() == "nan" else text
+
+
+def try_float(value) -> float | None:
+    text = clean_text(value).replace(",", "")
+    if not text:
+        return None
+    try:
+        return float(text.lstrip("<").strip())
+    except ValueError:
+        return None
+
+
+def try_int(value) -> int | None:
+    if value is None or pd.isna(value):
+        return None
+    try:
+        return int(float(str(value)))
+    except ValueError:
+        return None
+
+
+def build_partial_date(year, day) -> str | None:
+    parsed_year = try_int(year)
+    parsed_day = try_int(day)
+    if parsed_year and parsed_day and 1 <= parsed_day <= 31:
+        return f"{parsed_year:04d}-01-{parsed_day:02d}"
+    if parsed_year:
+        return f"{parsed_year:04d}"
+    return None

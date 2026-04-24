@@ -16,19 +16,32 @@ class LiteratureSearchAdapter(BaseAdapter):
     source_id = "literature_search"
 
     THEMES = {
-        "plant": [
+        "crop": [
             "cadmium rice grain concentration",
+            "cadmium rice grain mg/kg",
             "cadmium wheat grain concentration",
+            "cadmium wheat grain mg/kg",
             "cadmium leafy vegetables mg/kg",
+            "cadmium uptake crops",
             "cadmium cocoa beans concentration",
             "cadmium potato concentration",
-            "cadmium edible plant cadmium concentration",
+            "cadmium edible crop cadmium concentration",
+            "cadmium edible crop concentration",
         ],
         "feces": [
             "fecal cadmium concentration",
             "stool cadmium concentration",
             "cadmium in feces mg/kg",
             "human feces cadmium",
+            "cadmium in feces human",
+            "cadmium excretion feces concentration",
+            "stool cadmium mg/kg",
+        ],
+        "water": [
+            "cadmium irrigation water concentration",
+            "cadmium groundwater concentration ug/L",
+            "cadmium surface water concentration ug/L",
+            "cadmium drinking water concentration",
         ],
         "fertilizer": [
             "phosphate fertilizer cadmium",
@@ -37,9 +50,8 @@ class LiteratureSearchAdapter(BaseAdapter):
     }
 
     CURATED_TARGETS = {
-        "PMC12733840": {"layer": "plant", "search_query": "cadmium rice grain concentration"},
-        "PMC13025951": {"layer": "plant", "search_query": "cadmium wheat grain concentration"},
-        "PMC12137722": {"layer": "feces", "search_query": "stool cadmium concentration"},
+        "PMC12733840": {"layer": "crop", "search_query": "cadmium rice grain concentration"},
+        "PMC13025951": {"layer": "crop", "search_query": "cadmium wheat grain concentration"},
     }
 
     def fetch(self) -> list:
@@ -303,8 +315,6 @@ class LiteratureSearchAdapter(BaseAdapter):
             records = self._extract_rice_grain_table(item, soup, payload)
         elif pmcid == "PMC13025951":
             records = self._extract_cereal_region_tables(item, soup, payload)
-        elif pmcid == "PMC12137722":
-            records = self._extract_stool_summary_records(item, soup, payload)
         else:
             records = 0
         item["review_needed"] = bool(supplement_links)
@@ -330,13 +340,13 @@ class LiteratureSearchAdapter(BaseAdapter):
             value = parse_first_numeric(value_text)
             if not site or value is None:
                 continue
-            sample_id = stable_id(item["study_id"], "plant", site, "TCd-G")
+            sample_id = stable_id(item["study_id"], "crop", site, "TCd-G")
             payload.samples.append(
                 SampleRecord(
                     sample_id=sample_id,
                     source_id=self.source_id,
                     study_id=item["study_id"],
-                    matrix_group="plant",
+                    matrix_group="crop",
                     matrix_subtype="rice_grain",
                     sample_name=f"Rice grain at site {site}",
                     specimen_or_part="grain",
@@ -408,7 +418,7 @@ class LiteratureSearchAdapter(BaseAdapter):
                         sample_id=sample_id,
                         source_id=self.source_id,
                         study_id=item["study_id"],
-                        matrix_group="plant",
+                        matrix_group="crop",
                         matrix_subtype=matrix_subtype,
                         sample_name=f"{crop_label} mean cadmium concentration in {region}",
                         specimen_or_part=specimen,
@@ -441,58 +451,6 @@ class LiteratureSearchAdapter(BaseAdapter):
                 )
                 count += 1
         return count
-
-    def _extract_stool_summary_records(self, item: dict, soup: BeautifulSoup, payload: ParsedPayload) -> int:
-        text = clean_text(soup.get_text(" ", strip=True)) or ""
-        median_match = re.search(
-            r"medium concentrations of mercury, cadmium, lead, arsenic.*?were\s+[0-9.]+,\s+([0-9.]+),.*?μg/g",
-            text,
-            flags=re.IGNORECASE,
-        )
-        if not median_match:
-            return 0
-        value_text = median_match.group(1)
-        value = parse_first_numeric(value_text)
-        if value is None:
-            return 0
-        sample_id = stable_id(item["study_id"], "feces", "infant_stool", "median")
-        payload.samples.append(
-            SampleRecord(
-                sample_id=sample_id,
-                source_id=self.source_id,
-                study_id=item["study_id"],
-                matrix_group="feces",
-                matrix_subtype="infant_stool",
-                sample_name="Infant stool cadmium concentration median",
-                specimen_or_part="stool",
-                dry_wet_basis=None,
-                country=None,
-                publication_year=item.get("year"),
-                year_for_plotting=item.get("year"),
-                year_for_plotting_source="publication_year" if item.get("year") else None,
-                comments=f"Parsed from narrative summary in {item.get('pmcid')}",
-            )
-        )
-        payload.measurements_raw.append(
-            RawMeasurementRecord(
-                measurement_id=stable_id(sample_id, "cadmium", "median"),
-                sample_id=sample_id,
-                analyte_name="cadmium",
-                raw_value=value,
-                raw_value_text=value_text,
-                raw_unit="ug/g",
-                nondetect_flag=False,
-                detection_qualifier=None,
-                raw_basis_text=None,
-                page_or_sheet=item.get("pmcid"),
-                table_or_figure="Results narrative",
-                row_label="infant stool",
-                column_label="cadmium median concentration",
-                extraction_method="pmc_html_narrative_summary",
-                confidence_score=0.75,
-            )
-        )
-        return 1
 
     def _dedupe_inventory(self, inventory: list[dict]) -> list[dict]:
         seen = set()

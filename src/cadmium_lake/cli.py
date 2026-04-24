@@ -50,7 +50,7 @@ def parse(source: str | None = typer.Option(default=None, help="Single source id
 
 @app.command("literature-search")
 def literature_search(
-    layer: str | None = typer.Option(default=None, help="Limit search to plant or feces"),
+    layer: str | None = typer.Option(default=None, help="Limit search to crop, feces, water, or fertilizer"),
 ) -> None:
     results = run_literature_search(layer=layer)
     for name, count in results.items():

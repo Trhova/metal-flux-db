@@ -89,14 +89,30 @@ def run_qa_checks() -> dict[str, Path]:
 
     suspicious_values = (
         normalized.join(raw.select(["measurement_id", "sample_id", "raw_value_text", "raw_unit"]), on="measurement_id", how="left")
-        .join(samples.select(["sample_id", "matrix_group"]), on="sample_id", how="left")
+        .join(samples.select(["sample_id", "source_id", "matrix_group", "matrix_subtype", "sample_name"]), on="sample_id", how="left")
         .filter(
             (pl.col("canonical_value").is_not_null())
             & (
                 (pl.col("canonical_value") <= 0)
-                | ((pl.col("matrix_group") != "blood") & (pl.col("canonical_value") > 1000))
-                | ((pl.col("matrix_group") == "blood") & (pl.col("canonical_value") > 50))
+                | (
+                    (~pl.col("matrix_group").is_in(["blood", "water"]))
+                    & (pl.col("canonical_value") > 1000)
+                )
+                | (
+                    (pl.col("matrix_group").is_in(["blood", "water"]))
+                    & (pl.col("canonical_value") > 50)
+                )
             )
+        )
+        .with_columns(
+            pl.when(pl.col("canonical_value") <= 0)
+            .then(pl.lit("zero_or_negative_normalized_value"))
+            .when((~pl.col("matrix_group").is_in(["blood", "water"])) & (pl.col("canonical_value") > 1000))
+            .then(pl.lit("solid_matrix_gt_1000_mg_per_kg"))
+            .when((pl.col("matrix_group").is_in(["blood", "water"])) & (pl.col("canonical_value") > 50))
+            .then(pl.lit("liquid_matrix_gt_50_ug_per_l"))
+            .otherwise(pl.lit("other_suspicious_value"))
+            .alias("issue")
         )
         if not normalized.is_empty() and not raw.is_empty() and not samples.is_empty()
         else pl.DataFrame()

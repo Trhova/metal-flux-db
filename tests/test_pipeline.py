@@ -19,6 +19,7 @@ from cadmium_lake.sources.europe import (
     parse_numeric_text,
 )
 from cadmium_lake.sources import SOURCE_REGISTRY
+from cadmium_lake.sources.water import classify_water_subtype
 from cadmium_lake.viz.views import build_views
 
 
@@ -55,18 +56,32 @@ def test_parse_smoke_for_all_sources(tmp_path):
     initialize_catalog_tables()
     seed_washington_fixture()
     seed_usgs_fixture()
+    seed_gsi_fixture()
+    seed_foregs_fixture()
     seed_fda_fixture()
+    seed_canada_fixture()
+    seed_feces_literature_fixture()
     seed_nhanes_fixture()
+    seed_wqp_fixture()
+    seed_eea_water_fixture()
+    seed_efsa_seaweed_fixture()
 
     parse_sources(source="washington_fertilizer")
     parse_sources(source="usgs_soil")
+    parse_sources(source="gsi_dublin_soil")
+    parse_sources(source="foregs_geochemical_atlas_soil")
     parse_sources(source="fda_tds")
+    parse_sources(source="health_canada_tds_trace_elements")
+    parse_sources(source="feces_literature")
     parse_sources(source="nhanes_blood_cadmium")
+    parse_sources(source="usgs_wqp_water")
+    parse_sources(source="eea_waterbase_water")
+    parse_sources(source="efsa_seaweed_occurrence")
 
     samples = read_duckdb_table("samples")
     raw = read_duckdb_table("measurements_raw")
-    assert samples.height >= 4
-    assert raw.height >= 4
+    assert samples.height >= 5
+    assert raw.height >= 5
 
 
 def test_literature_search_capture(monkeypatch):
@@ -136,7 +151,7 @@ def test_literature_curated_extractors(monkeypatch):
     monkeypatch.setattr(adapter_cls, "_download_text", fake_download_text)
     monkeypatch.setattr(adapter_cls, "_download", lambda self, url: b"pdf-bytes")
 
-    results = run_literature_search(layer="plant")
+    results = run_literature_search(layer="crop")
     assert results["samples"] >= 2
     samples = read_duckdb_table("samples").filter(pl.col("source_id") == "literature_search")
     raw = read_duckdb_table("measurements_raw").join(samples.select("sample_id"), on="sample_id", how="inner")
@@ -224,16 +239,40 @@ def test_normalize_qa_and_views():
     initialize_catalog_tables()
     seed_washington_fixture()
     seed_usgs_fixture()
+    seed_gsi_fixture()
+    seed_foregs_fixture()
     seed_fda_fixture()
+    seed_canada_fixture()
+    seed_feces_literature_fixture()
     seed_nhanes_fixture()
+    seed_wqp_fixture()
+    seed_eea_water_fixture()
+    seed_efsa_seaweed_fixture()
     parse_sources()
     normalized = run_normalization()
-    assert normalized.height >= 4
+    assert normalized.height >= 5
     qa_outputs = run_qa_checks()
     assert "provenance_completeness_report" in qa_outputs
     build_views()
     chain = read_duckdb_table("measurements_normalized")
-    assert chain.height >= 4
+    assert chain.height >= 5
+    master = read_duckdb_table("measurement_master_view")
+    water = master.filter(pl.col("matrix_group") == "water")
+    assert water.height >= 1
+    assert set(water["canonical_unit"].to_list()) == {"ug/L"}
+    assert 0.00035 in water["ppm_equivalent"].to_list()
+    feces = master.filter(pl.col("matrix_group") == "feces")
+    assert feces.height >= 1
+    assert set(feces["source_access_type"].to_list()) == {"literature"}
+    sankey = read_duckdb_table("sankey_layer_medians_view")
+    assert "water" in sankey["source_layer"].to_list()
+
+
+def test_water_subtype_classifier():
+    assert classify_water_subtype({"MonitoringLocationTypeName": "Well"}) == "groundwater"
+    assert classify_water_subtype({"MonitoringLocationName": "River station"}) == "surface_water"
+    assert classify_water_subtype({"ProjectName": "Drinking water tap"}) == "drinking_water"
+    assert classify_water_subtype({"MonitoringLocationName": "Irrigation canal"}) == "irrigation_water"
 
 
 def seed_washington_fixture():
@@ -269,6 +308,52 @@ def seed_usgs_fixture():
         zf.write(csv_path, arcname="soil.csv")
 
 
+def seed_gsi_fixture():
+    raw_dir = paths.RAW_DIR / "gsi_dublin_soil"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw_dir.joinpath("cadmium_features.json").write_text(
+        """
+        {
+          "features": [
+            {
+              "attributes": {
+                "OBJECTID": 1,
+                "SAMPLE_ID": 1001,
+                "X_ITM": 715000,
+                "Y_ITM": 734000,
+                "X_ING": 315000,
+                "Y_ING": 234000,
+                "CD_MGKG": 1.25
+              }
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+
+def seed_foregs_fixture():
+    raw_dir = paths.RAW_DIR / "foregs_geochemical_atlas_soil"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    topsoil = (
+        '"GTN","LONG","LAT","COUNTRY","CD_MS","CNTRY"\n'
+        '"unit",,,,"mg/kg",\n'
+        '"DL",,,,0.01,\n'
+        '"N01E01T1",10.1,50.2,"DE",0.32,"DE"\n'
+    )
+    subsoil = (
+        '"GTN","LONG","LAT","COUNTRY","CD_MS","CNTRY"\n'
+        '"unit",,,,"mg/kg",\n'
+        '"DL",,,,0.01,\n'
+        '"N01E01C1",10.1,50.2,"DE",0.21,"DE"\n'
+    )
+    with zipfile.ZipFile(raw_dir / "Topsoil.zip", "w") as zf:
+        zf.writestr("Topsoil/T_icpadd_data_2v3_8Feb06.csv", topsoil)
+    with zipfile.ZipFile(raw_dir / "Subsoil.zip", "w") as zf:
+        zf.writestr("Subsoil/C_icpadd_data_2v5_9Feb06.csv", subsoil)
+
+
 def seed_fda_fixture():
     raw_dir = paths.RAW_DIR / "fda_tds"
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -280,8 +365,136 @@ def seed_fda_fixture():
         )
 
 
+def seed_canada_fixture():
+    raw_dir = paths.RAW_DIR / "health_canada_tds_trace_elements"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw_dir.joinpath("total-diet-study-trace-elements-results-1993-2018.csv").write_text(
+        (
+            "Food Name,Sample Code,Product Description,Food Group,Country of Origin,Intended Use,"
+            "Sample Type,Sub Sample,Sample Comments,Sample Collection Date,Reason Collected,"
+            "Human Illness Flag,Sampling Location Type,Sampling Location City Name,"
+            "Sampling Location Province,Sampling Location Country,Lab Name,Analysis Completion Date,"
+            "Result Operator,Result Value,Units of measurement,Analyte Name,Analyte Group,LOD,"
+            "Basis for Result,Quality Assurance,Result Comments,Test Method Name,Test Method Code,"
+            "Instrumentation,Method Comments,Project Code,Project Name,Project Description,Organization\n"
+            "Apple Juice,TDS2001-HH01-TraceElements,HH01 Apple juice,Fruit juice,Unknown,"
+            "Ready-to-eat,Composite,Yes,,2001-09-15,Surveillance,No,Grocery Store,"
+            "St. John's,Newfoundland and Labrador,Canada,HC FD BCS FRD Trace Elements,"
+            "2002-02-01,=,1.7,ng/g,Cadmium (Cd),Elements,0,As consumed,"
+            "QA passed,Results reported as zero are <LOD.,ICP-MS,,ICP-MS,,"
+            "BCS.TDS2001.TraceElements,Total Diet Study 2001 Trace Elements,,Health Canada\n"
+        ),
+        encoding="latin-1",
+    )
+    raw_dir.joinpath("data-dictionary-en.txt").write_text("fixture dictionary", encoding="utf-8")
+
+
+def seed_feces_literature_fixture():
+    raw_dir = paths.RAW_DIR / "feces_literature"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw_dir.joinpath("yabe_2018_kabwe_feces_urine.pdf").write_bytes(b"%PDF fixture")
+
+
 def seed_nhanes_fixture():
     raw_dir = paths.RAW_DIR / "nhanes_blood_cadmium"
     raw_dir.mkdir(parents=True, exist_ok=True)
     frame = pd.DataFrame([{"SEQN": 1001, "LBXBCD": 0.31, "SDDSRVYR": 10}])
     pyreadstat.write_xport(frame, raw_dir / "cadmium_fixture.xpt")
+
+
+def seed_wqp_fixture():
+    raw_dir = paths.RAW_DIR / "usgs_wqp_water"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw_dir.joinpath("wqp_fixture.csv").write_text(
+        (
+            "OrganizationIdentifier,OrganizationFormalName,ActivityIdentifier,ActivityMediaName,"
+            "ActivityStartDate,MonitoringLocationIdentifier,MonitoringLocationName,"
+            "ActivityLocation/LatitudeMeasure,ActivityLocation/LongitudeMeasure,"
+            "ResultIdentifier,ResultDetectionConditionText,CharacteristicName,ResultSampleFractionText,"
+            "ResultMeasureValue,ResultMeasure/MeasureUnitCode,MeasureQualifierCode,USGSPCode,"
+            "ResultAnalyticalMethod/MethodName\n"
+            "USGS,United States Geological Survey,ACT-1,Water,2020-05-01,USGS-1,Test Well,"
+            "38.5,-121.5,RES-1,,Cadmium,Dissolved,0.35,ug/l,,01025,ICP-MS\n"
+        ),
+        encoding="utf-8",
+    )
+
+
+def seed_eea_water_fixture():
+    raw_dir = paths.RAW_DIR / "eea_waterbase_water"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    raw_dir.joinpath("cadmium_DK_2020_2024.json").write_text(
+        """
+        {
+          "query": "fixture",
+          "country": "DK",
+          "start_year": 2020,
+          "end_year": 2024,
+          "rows": [
+            {
+              "countryCode": "DK",
+              "monitoringSiteIdentifier": "DKRW-1",
+              "monitoringSiteIdentifierScheme": "euMonitoringSiteCode",
+              "parameterWaterBodyCategory": "RW",
+              "observedPropertyDeterminandCode": "CAS_7440-43-9",
+              "observedPropertyDeterminandLabel": "Cadmium and its compounds",
+              "procedureAnalysedMatrix": "W-DIS",
+              "resultUom": "ug/L",
+              "phenomenonTimeSamplingDate": "2021-06-15",
+              "phenomenonTimeReferenceYear": 2021,
+              "sampleIdentifier": "SAMPLE-1",
+              "resultObservedValue": 0.12,
+              "resultQualityObservedValueBelowLOQ": false,
+              "procedureLOQValue": 0.02,
+              "parameterSampleDepth": null,
+              "resultObservationStatus": "A",
+              "Remarks": null,
+              "metadata_versionId": "fixture",
+              "metadata_beginLifeSpanVersion": "2025-01-01",
+              "metadata_statusCode": "valid",
+              "UID": 123
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+
+def seed_efsa_seaweed_fixture():
+    raw_dir = paths.RAW_DIR / "efsa_seaweed_occurrence"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    frame = pd.DataFrame(
+        [
+            {
+                "resId_A": "RES-CD-1",
+                "sampAnId_A": "AN-1",
+                "sampId_A": "SAMP-1",
+                "sampEventId_A": "EVENT-1",
+                "analysisY": 2020,
+                "anMethCode.base.meth": "F001A",
+                "exprResType": "B001A",
+                "labCountry": "DK",
+                "origCountry": "NO",
+                "procCountry": "DK",
+                "paramCode.base.param": "RF-00000150-CHE",
+                "resType": "VAL",
+                "resUnit": "G050A",
+                "resLOD": 2.0,
+                "resLOQ": 7.0,
+                "resVal": 500.0,
+                "sampCountry": "DK",
+                "sampD": 2,
+                "sampY": 2020,
+                "sampPoint": "E350A",
+                "sampMatCode_desc": "Dried vegetables#RACSOURCE=Laver",
+                "anMatCode_desc": "Dried vegetables#RACSOURCE=Laver",
+                "sampMatCode_last": "A00ZQ",
+                "outcome": None,
+                "issue": None,
+            }
+        ]
+    )
+    with pd.ExcelWriter(raw_dir / "Annex_C_Raw_Ocurrence_data.xls", engine="openpyxl") as writer:
+        pd.DataFrame().to_excel(writer, sheet_name="Cover page", index=False)
+        frame.to_excel(writer, sheet_name="Raw Food occurrence data", index=False)
